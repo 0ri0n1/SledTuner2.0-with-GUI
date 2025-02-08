@@ -15,6 +15,9 @@ namespace SledTunerProject
         private string _configFilePath;
         private bool _isInitialized = false;
 
+        // Event fired after configuration is successfully loaded (or reset) so that GUI can update.
+        public event Action ConfigurationLoaded;
+
         public ConfigManager(SledParameterManager sledParameterManager)
         {
             _sledParameterManager = sledParameterManager ?? throw new ArgumentNullException(nameof(sledParameterManager));
@@ -117,6 +120,8 @@ namespace SledTunerProject
                 {
                     _sledParameterManager.SetParameters(data);
                     MelonLogger.Msg($"[ConfigManager] Loaded configuration from: {_configFilePath}");
+                    // Notify subscribers (e.g., GUIManager) to update their fields.
+                    ConfigurationLoaded?.Invoke();
                 }
                 else
                 {
@@ -130,51 +135,32 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Resets the configuration by reverting the sled parameters to their original values.
+        /// Resets the configuration by reverting parameters to their original values.
         /// This does not delete the configuration file.
         /// </summary>
         public void ResetParameters()
         {
             _sledParameterManager.ResetParameters();
             MelonLogger.Msg("[ConfigManager] Sled parameters reset to original values.");
+            // Notify subscribers so that GUI updates.
+            ConfigurationLoaded?.Invoke();
         }
 
         /// <summary>
-        /// Toggles the ragdoll state by navigating the object hierarchy:
-        /// Snowmobile(Clone) => Body => IK Player (Drivers)
-        /// and then toggling the 'enabled' property of the RagDollManager and RagDollCollisionController components.
+        /// Toggles the ragdoll state by enabling/disabling related components.
         /// </summary>
         public void ToggleRagdoll()
         {
             MelonLogger.Msg("[ConfigManager] ToggleRagdoll called.");
-
-            // First, find the Snowmobile(Clone) object.
-            GameObject snowmobile = GameObject.Find("Snowmobile(Clone)");
-            if (snowmobile == null)
+            // Look in the correct hierarchy: Snowmobile(Clone) => Body => IK Player (Drivers)
+            GameObject driverGO = GameObject.Find("Snowmobile(Clone)/Body/IK Player (Drivers)");
+            if (driverGO == null)
             {
-                MelonLogger.Warning("[ConfigManager] 'Snowmobile(Clone)' not found.");
+                MelonLogger.Warning("[ConfigManager] 'IK Player (Drivers)' not found under Snowmobile(Clone)/Body.");
                 return;
             }
 
-            // Find the Body child.
-            Transform body = snowmobile.transform.Find("Body");
-            if (body == null)
-            {
-                MelonLogger.Warning("[ConfigManager] 'Body' not found under Snowmobile(Clone).");
-                return;
-            }
-
-            // Find the IK Player (Drivers) child.
-            Transform driverTransform = body.Find("IK Player (Drivers)");
-            if (driverTransform == null)
-            {
-                MelonLogger.Warning("[ConfigManager] 'IK Player (Drivers)' not found under Body.");
-                return;
-            }
-
-            GameObject driverGO = driverTransform.gameObject;
-
-            // Toggle RagDollManager.
+            // Toggle RagDollManager
             Component ragdollManager = driverGO.GetComponent("RagDollManager");
             if (ragdollManager != null)
             {
@@ -186,7 +172,7 @@ namespace SledTunerProject
                 MelonLogger.Msg("[ConfigManager] RagDollManager component not found.");
             }
 
-            // Toggle RagDollCollisionController.
+            // Toggle RagDollCollisionController
             Component ragdollCollision = driverGO.GetComponent("RagDollCollisionController");
             if (ragdollCollision != null)
             {
@@ -200,8 +186,7 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Toggles the tree renderer state by finding the "LevelEssentials" object and toggling
-        /// the active state of its "TreeRenderer" child.
+        /// Toggles the tree renderer state.
         /// </summary>
         public void ToggleTreeRenderer()
         {
@@ -209,24 +194,23 @@ namespace SledTunerProject
             GameObject levelEssentials = GameObject.Find("LevelEssentials");
             if (levelEssentials == null)
             {
-                MelonLogger.Msg("[ConfigManager] LevelEssentials not found.");
+                MelonLogger.Warning("[ConfigManager] 'LevelEssentials' not found.");
                 return;
             }
             Transform treeRendererTransform = levelEssentials.transform.Find("TreeRenderer");
             if (treeRendererTransform == null)
             {
-                MelonLogger.Msg("[ConfigManager] TreeRenderer not found under LevelEssentials.");
+                MelonLogger.Warning("[ConfigManager] 'TreeRenderer' not found under LevelEssentials.");
                 return;
             }
             GameObject treeRenderer = treeRendererTransform.gameObject;
-            bool currentState = treeRenderer.activeSelf;
-            treeRenderer.SetActive(!currentState);
-            MelonLogger.Msg($"[ConfigManager] TreeRenderer toggled to {!currentState}.");
+            bool newState = !treeRenderer.activeSelf;
+            treeRenderer.SetActive(newState);
+            MelonLogger.Msg($"[ConfigManager] TreeRenderer toggled to {(newState ? "ON" : "OFF")}.");
         }
 
         /// <summary>
-        /// Teleports the sled to a predetermined location.
-        /// (Currently a stub; implement your teleportation logic here.)
+        /// Teleports the sled. (Teleport logic remains for future integration.)
         /// </summary>
         public void TeleportSled()
         {
@@ -235,16 +219,15 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Helper method to toggle the "enabled" property of a Component.
+        /// Helper method to toggle a component’s enabled state via its 'enabled' property.
         /// </summary>
         private void ToggleComponentEnabled(Component comp)
         {
-            var type = comp.GetType();
-            var prop = type.GetProperty("enabled", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+            var prop = comp.GetType().GetProperty("enabled", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
             if (prop != null && prop.CanRead && prop.CanWrite)
             {
-                bool current = (bool)prop.GetValue(comp, null);
-                prop.SetValue(comp, !current, null);
+                bool currentState = (bool)prop.GetValue(comp, null);
+                prop.SetValue(comp, !currentState, null);
             }
         }
     }

@@ -17,8 +17,10 @@ namespace SledTunerProject
         private Vector2 _scrollPos = Vector2.zero;
         // Field inputs: Component name -> (Field name -> string value)
         private Dictionary<string, Dictionary<string, string>> _fieldInputs = new Dictionary<string, Dictionary<string, string>>();
+        // Persistent foldout states for Advanced (Tree) view.
+        private Dictionary<string, bool> _foldoutStates = new Dictionary<string, bool>();
 
-        // === GUI STYLES (Initialized lazily in OnGUI) ===
+        // === GUI STYLES (initialized lazily in OnGUI) ===
         private GUIStyle _windowStyle;
         private GUIStyle _labelStyle;
         private GUIStyle _textFieldStyle;
@@ -28,9 +30,12 @@ namespace SledTunerProject
         private GUIStyle _headerStyle;
 
         // === ADDITIONAL FEATURES STATE ===
-        private bool _manualApply = true;     // If true, changes are not auto-applied.
-        private bool _showHelp = false;         // Toggle for help panel.
-        private bool _advancedView = false;     // Toggle between simple and advanced view.
+        private bool _manualApply = true;         // If true, changes take effect only after pressing "Apply".
+        private bool _showHelp = false;             // Toggle for help panel.
+        // _advancedView = true means using the full tuner menu; false = simple tuner menu.
+        private bool _advancedView = true;
+        // Within Advanced view, _treeViewEnabled toggles collapsible (tree) layout.
+        private bool _treeViewEnabled = true;
 
         // === WINDOW CONTROLS & RESIZING ===
         private bool _isMinimized = false;
@@ -39,14 +44,38 @@ namespace SledTunerProject
         private Vector2 _resizeStartMousePos;
         private Rect _resizeStartWindowRect;
         private ResizeEdges _resizeEdges;
-        private float _opacity = 1f;            // 0 (transparent) to 1 (opaque)
+        private float _opacity = 1f;                // 0 (transparent) to 1 (opaque)
 
         private struct ResizeEdges
         {
             public bool left, right, top, bottom;
         }
 
-        // === COLOR PREVIEW TEXTURE (for headlight color) ===
+        // === SIMPLE VIEW LOCAL PARAMETERS (for the simple tuner menu) ===
+        private float speed = 10f;
+        private float gravity = -9.81f;
+        private float power = 143000f;
+        private float lugHeight = 0.18f;
+        private float trackLength = 1f;
+        private float pitchFactor = 7f;
+        private float lightR = 1f;
+        private float lightG = 1f;
+        private float lightB = 1f;
+        private float lightA = 1f;
+        private bool notdriverInvincible = true;
+        private bool test = false;
+        private bool apply = false;
+
+        // Original values for Reset (for simple view)
+        private float originalPower = 143000f;
+        private float originalLugHeight = 0.18f;
+        private float originalTrackLength = 1f;
+        private float originalGravity = -9.81f;
+        private float originalPitchFactor = 7f;
+
+        // === COLOR PREVIEW TEXTURE ===
+        // This texture is used in both Advanced and Simple views.
+        // We will create a 30x30 texture filled with the preview color.
         private Texture2D _colorPreviewTexture;
 
         // === CONSTRUCTOR ===
@@ -58,6 +87,8 @@ namespace SledTunerProject
             _windowRect = new Rect(Screen.width * 0.2f, Screen.height * 0.2f,
                                      Screen.width * 0.6f, Screen.height * 0.6f);
             _resizeEdges = new ResizeEdges();
+            _advancedView = true;      // default to Advanced view
+            _treeViewEnabled = true;   // default to using collapsible (tree) layout in Advanced view
         }
 
         // === PUBLIC METHODS ===
@@ -82,6 +113,7 @@ namespace SledTunerProject
 
         /// <summary>
         /// Refresh the field inputs dictionary from SledParameterManager.
+        /// (Used by both Advanced and Simple views.)
         /// </summary>
         public void RePopulateFields()
         {
@@ -97,11 +129,17 @@ namespace SledTunerProject
                     _fieldInputs[compName][field] = (val != null) ? val.ToString() : "(No data)";
                 }
             }
+            // Update persistent foldout states for Advanced (Tree) view.
+            foreach (var comp in _fieldInputs.Keys)
+            {
+                if (!_foldoutStates.ContainsKey(comp))
+                    _foldoutStates[comp] = true; // default expanded
+            }
             MelonLogger.Msg("[GUIManager] Fields repopulated.");
         }
 
         /// <summary>
-        /// Draw the GUI window; call this from your Main.OnGUI().
+        /// Draw the GUI window; call this from Main.OnGUI().
         /// </summary>
         public void DrawMenu()
         {
@@ -112,24 +150,12 @@ namespace SledTunerProject
             if (_windowStyle == null)
             {
                 _windowStyle = new GUIStyle(GUI.skin.window);
-                _labelStyle = new GUIStyle(GUI.skin.label)
-                {
-                    richText = true,
-                    fontSize = 12
-                };
+                _labelStyle = new GUIStyle(GUI.skin.label) { richText = true, fontSize = 12 };
                 _textFieldStyle = new GUIStyle(GUI.skin.textField);
                 _buttonStyle = new GUIStyle(GUI.skin.button);
                 _toggleStyle = new GUIStyle(GUI.skin.toggle);
-                _foldoutStyle = new GUIStyle(GUI.skin.toggle)
-                {
-                    richText = true,
-                    fontSize = 13
-                };
-                _headerStyle = new GUIStyle(GUI.skin.label)
-                {
-                    fontStyle = FontStyle.Bold,
-                    fontSize = 14
-                };
+                _foldoutStyle = new GUIStyle(GUI.skin.toggle) { richText = true, fontSize = 13 };
+                _headerStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 14 };
             }
 
             // Apply window opacity.
@@ -139,7 +165,7 @@ namespace SledTunerProject
             // Draw the window.
             _windowRect = GUILayout.Window(1234, _windowRect, WindowFunction, "SledTuner Menu", _windowStyle);
 
-            GUI.color = prevColor; // restore color
+            GUI.color = prevColor; // restore original color
 
             // Handle window resizing.
             HandleResize();
@@ -149,61 +175,52 @@ namespace SledTunerProject
 
         /// <summary>
         /// Main window function that draws the contents.
+        /// Chooses between Advanced and Simple tuner menus.
         /// </summary>
         private void WindowFunction(int windowID)
         {
-            // --- Title Bar with window controls ---
+            if (_isMinimized)
+            {
+                // When minimized, only show the title bar.
+                DrawTitleBar();
+                GUI.DragWindow(new Rect(0, 0, _windowRect.width, 20));
+                return;
+            }
+
             DrawTitleBar();
             GUILayout.Space(5);
 
-            // --- Config Buttons: Load, Save, Reset, Apply ---
-            DrawConfigButtons();
-            GUILayout.Space(5);
-
-            // --- Mode Toggles: Manual Apply and Advanced View ---
-            DrawModeToggles();
-            GUILayout.Space(5);
-
-            // --- Main Parameters Area ---
-            _scrollPos = GUILayout.BeginScrollView(_scrollPos, GUILayout.ExpandHeight(true));
             if (_advancedView)
-                DrawTreeViewParameters();
+            {
+                DrawAdvancedTunerMenu();
+            }
             else
-                DrawSimpleParameters();
-            GUILayout.EndScrollView();
+            {
+                DrawSimpleTunerMenu();
+            }
 
-            // --- Footer Buttons: Extra Toggles and Teleport ---
-            GUILayout.Space(5);
-            DrawFooter();
-            GUILayout.Space(5);
-            DrawOpacitySlider();
-
-            // Make the window draggable (by its top area).
             GUI.DragWindow(new Rect(0, 0, 10000, 20));
         }
 
         /// <summary>
-        /// Draw the title bar with header and window control buttons.
+        /// Draws the title bar with header, window control buttons, and a "Switch View" button.
         /// </summary>
         private void DrawTitleBar()
         {
             GUILayout.BeginHorizontal();
             GUILayout.Label("SledTuner Menu", _headerStyle, GUILayout.ExpandWidth(true));
             if (GUILayout.Button("?", _buttonStyle, GUILayout.Width(30)))
-            {
                 _showHelp = !_showHelp;
-            }
             if (GUILayout.Button("_", _buttonStyle, GUILayout.Width(30)))
-            {
                 MinimizeWindow();
-            }
             if (GUILayout.Button("[ ]", _buttonStyle, GUILayout.Width(30)))
-            {
                 MaximizeWindow();
-            }
             if (GUILayout.Button("X", _buttonStyle, GUILayout.Width(30)))
-            {
                 CloseWindow();
+            if (GUILayout.Button("Switch View", _buttonStyle, GUILayout.Width(100)))
+            {
+                _advancedView = !_advancedView;
+                MelonLogger.Msg("[GUIManager] Switched to " + (_advancedView ? "Advanced View" : "Simple View") + ".");
             }
             GUILayout.EndHorizontal();
 
@@ -215,7 +232,7 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Draw the configuration buttons: Load, Save, Reset, Apply.
+        /// Draws the configuration buttons: Load, Save, Reset, and Apply.
         /// </summary>
         private void DrawConfigButtons()
         {
@@ -246,126 +263,173 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Draw toggles for Manual Apply and Advanced View.
+        /// Draws the Advanced Tuner Menu.
+        /// In Advanced view, a row is added with "Manual Apply" and a "Tree View" toggle.
+        /// When Tree View is enabled, parameters are shown in collapsible groups;
+        /// otherwise, they are shown in a flat list.
         /// </summary>
-        private void DrawModeToggles()
+        private void DrawAdvancedTunerMenu()
         {
+            DrawConfigButtons();
+            GUILayout.Space(5);
             GUILayout.BeginHorizontal();
             _manualApply = GUILayout.Toggle(_manualApply, "Manual Apply", _toggleStyle, GUILayout.Width(120));
-            _advancedView = GUILayout.Toggle(_advancedView, "Advanced View", _toggleStyle, GUILayout.Width(120));
+            _treeViewEnabled = GUILayout.Toggle(_treeViewEnabled, "Tree View", _toggleStyle, GUILayout.Width(100));
             GUILayout.EndHorizontal();
+            GUILayout.Space(5);
+
+            _scrollPos = GUILayout.BeginScrollView(_scrollPos, GUILayout.ExpandHeight(true));
+            if (_treeViewEnabled)
+                DrawTreeViewParameters();
+            else
+                DrawAdvancedFlatParameters();
+            GUILayout.EndScrollView();
+
+            GUILayout.Space(5);
+            DrawFooter();
+            GUILayout.Space(5);
+            DrawOpacitySlider();
         }
 
         /// <summary>
-        /// Draw parameters in a flat, simple view.
+        /// Draws the Simple Tuner Menu (mirroring the other mod's layout).
         /// </summary>
-        private void DrawSimpleParameters()
+        private void DrawSimpleTunerMenu()
+        {
+            GUILayout.BeginVertical();
+            GUILayout.Label("Simple Tuner Menu", _headerStyle);
+            GUILayout.Space(5);
+
+            // Top row: Apply toggle and Reset button.
+            GUILayout.BeginHorizontal();
+            apply = GUILayout.Toggle(apply, "Apply", _toggleStyle, GUILayout.Width(80));
+            if (GUILayout.Button("Reset", _buttonStyle, GUILayout.Width(80)))
+                ResetValues();
+            GUILayout.EndHorizontal();
+            GUILayout.Space(10);
+
+            // FlySpeed control
+            GUILayout.Label("FlySpeed");
+            speed = FloatFieldWithSlider(speed, 0f, 200f, 0.1f);
+
+            // Gravity control
+            GUILayout.Label("Gravity");
+            gravity = FloatFieldWithSlider(gravity, -10f, 10f, 0.1f);
+
+            // Power control
+            GUILayout.Label("Power");
+            power = FloatFieldWithSlider(power, 0f, 300000f, 1000f);
+
+            // Lug Height control
+            GUILayout.Label("Lug Height");
+            lugHeight = FloatFieldWithSlider(lugHeight, 0f, 2f, 0.01f);
+
+            // Track Length control
+            GUILayout.Label("Track Length");
+            trackLength = FloatFieldWithSlider(trackLength, 0.5f, 2f, 0.01f);
+
+            // Pitch Factor control
+            GUILayout.Label("Pitch Factor");
+            pitchFactor = FloatFieldWithSlider(pitchFactor, 2f, 30f, 0.1f);
+
+            GUILayout.Space(10);
+            GUILayout.Label("Headlight Color (RGBA)");
+            lightR = FloatFieldWithSliderWithButtons("R", lightR, 0f, 1f, 0.1f);
+            lightG = FloatFieldWithSliderWithButtons("G", lightG, 0f, 1f, 0.1f);
+            lightB = FloatFieldWithSliderWithButtons("B", lightB, 0f, 1f, 0.1f);
+            lightA = FloatFieldWithSliderWithButtons("A", lightA, 0f, 1f, 0.1f);
+
+            GUILayout.Space(5);
+            GUILayout.Label("Color Preview:");
+            // Create a 30x30 texture filled with the current headlight color.
+            Texture2D preview = new Texture2D(30, 30, TextureFormat.RGBA32, false);
+            preview.filterMode = FilterMode.Bilinear;
+            preview.wrapMode = TextureWrapMode.Clamp;
+            Color currentColor = new Color(lightR, lightG, lightB, lightA);
+            Color[] pixels = new Color[30 * 30];
+            for (int i = 0; i < pixels.Length; i++)
+                pixels[i] = currentColor;
+            preview.SetPixels(pixels);
+            preview.Apply();
+            GUILayout.Box(preview, GUILayout.Width(30), GUILayout.Height(30));
+
+            GUILayout.Space(10);
+            notdriverInvincible = GUILayout.Toggle(notdriverInvincible, "Driver Ragdoll", _toggleStyle, GUILayout.Width(150));
+            test = GUILayout.Toggle(test, "Test", _toggleStyle, GUILayout.Width(150));
+
+            GUILayout.Space(10);
+            GUILayout.Label("Made by Samisalami", _labelStyle, GUILayout.Width(200));
+            GUILayout.EndVertical();
+        }
+
+        /// <summary>
+        /// Draws a flat list of parameters for Advanced view (when Tree View toggle is off).
+        /// </summary>
+        private void DrawAdvancedFlatParameters()
         {
             foreach (var comp in _fieldInputs)
             {
                 GUILayout.Label("<b>Component: " + comp.Key + "</b>", _labelStyle);
-                foreach (var field in comp.Value)
-                {
-                    GUILayout.BeginHorizontal();
-                    GUILayout.Label(field.Key + ":", _labelStyle, GUILayout.Width(150));
-                    Type fieldType = _sledParameterManager.GetFieldType(comp.Key, field.Key);
-
-                    // For numeric fields, draw slider + plus/minus buttons.
-                    if (fieldType == typeof(float) || fieldType == typeof(int))
-                    {
-                        float currentVal = 0f;
-                        float.TryParse(field.Value, out currentVal);
-                        float sliderMin = _sledParameterManager.GetSliderMin(comp.Key, field.Key);
-                        float sliderMax = _sledParameterManager.GetSliderMax(comp.Key, field.Key);
-                        float step = (fieldType == typeof(float)) ? 0.1f : 1f;
-
-                        float newVal = GUILayout.HorizontalSlider(currentVal, sliderMin, sliderMax, GUILayout.Width(150));
-                        string newText = GUILayout.TextField(newVal.ToString("F2"), _textFieldStyle, GUILayout.Width(50));
-                        if (float.TryParse(newText, out float parsedVal))
-                        {
-                            newVal = parsedVal;
-                        }
-                        GUILayout.BeginHorizontal(GUILayout.Width(60));
-                        if (GUILayout.Button("-", _buttonStyle, GUILayout.Width(25)))
-                        {
-                            newVal = Mathf.Max(sliderMin, newVal - step);
-                        }
-                        if (GUILayout.Button("+", _buttonStyle, GUILayout.Width(25)))
-                        {
-                            newVal = Mathf.Min(sliderMax, newVal + step);
-                        }
-                        GUILayout.EndHorizontal();
-
-                        string finalValStr = newVal.ToString();
-                        if (finalValStr != field.Value)
-                        {
-                            _fieldInputs[comp.Key][field.Key] = finalValStr;
-                            object convertedValue = ConvertInput(finalValStr, fieldType);
-                            _sledParameterManager.SetFieldValue(comp.Key, field.Key, convertedValue);
-                            if (!_manualApply)
-                            {
-                                _sledParameterManager.ApplyParameters();
-                            }
-                        }
-                    }
-                    // For boolean fields, draw a toggle.
-                    else if (fieldType == typeof(bool))
-                    {
-                        bool currentBool = false;
-                        bool.TryParse(field.Value, out currentBool);
-                        bool newBool = GUILayout.Toggle(currentBool, currentBool ? "On" : "Off", _toggleStyle, GUILayout.Width(80));
-                        if (newBool != currentBool)
-                        {
-                            _fieldInputs[comp.Key][field.Key] = newBool.ToString();
-                            _sledParameterManager.SetFieldValue(comp.Key, field.Key, newBool);
-                            _sledParameterManager.ApplyParameters();
-                        }
-                    }
-                    // For other types, use a plain text field.
-                    else
-                    {
-                        string newValue = GUILayout.TextField(field.Value, _textFieldStyle, GUILayout.ExpandWidth(true));
-                        if (newValue != field.Value)
-                        {
-                            _fieldInputs[comp.Key][field.Key] = newValue;
-                            object conv = ConvertInput(newValue, fieldType);
-                            _sledParameterManager.SetFieldValue(comp.Key, field.Key, conv);
-                            if (!_manualApply)
-                            {
-                                _sledParameterManager.ApplyParameters();
-                            }
-                        }
-                    }
-                    GUILayout.EndHorizontal();
-                }
-                // Special handling for the Light component: draw a live color preview after its parameters.
+                DrawSimpleParametersForComponent(comp.Key, comp.Value);
                 if (comp.Key == "Light")
                 {
                     GUILayout.Space(5);
-                    GUILayout.Label("<b>Headlight Color Preview:</b>", _labelStyle);
-                    DrawLightColorPreview();
+                    GUILayout.Label("Color Preview:", _labelStyle);
+                    float r = 1f, g = 1f, b = 1f, a = 1f;
+                    if (comp.Value.ContainsKey("r")) float.TryParse(comp.Value["r"], out r);
+                    if (comp.Value.ContainsKey("g")) float.TryParse(comp.Value["g"], out g);
+                    if (comp.Value.ContainsKey("b")) float.TryParse(comp.Value["b"], out b);
+                    if (comp.Value.ContainsKey("a")) float.TryParse(comp.Value["a"], out a);
+                    Color previewColor = new Color(r, g, b, a);
+                    Texture2D previewTex = new Texture2D(30, 30, TextureFormat.RGBA32, false);
+                    previewTex.filterMode = FilterMode.Bilinear;
+                    previewTex.wrapMode = TextureWrapMode.Clamp;
+                    Color[] pixels = new Color[30 * 30];
+                    for (int i = 0; i < pixels.Length; i++)
+                        pixels[i] = previewColor;
+                    previewTex.SetPixels(pixels);
+                    previewTex.Apply();
+                    GUILayout.Box(previewTex, GUILayout.Width(30), GUILayout.Height(30));
                 }
                 GUILayout.Space(10);
             }
         }
 
         /// <summary>
-        /// Draw parameters in a tree view (collapsible foldouts).
+        /// Draws parameters in a tree view (collapsible foldouts) for Advanced view.
         /// </summary>
         private void DrawTreeViewParameters()
         {
-            // For simplicity, use a temporary dictionary to hold foldout states.
-            Dictionary<string, bool> foldouts = new Dictionary<string, bool>();
             foreach (var comp in _fieldInputs)
             {
-                if (!foldouts.ContainsKey(comp.Key))
-                    foldouts[comp.Key] = true; // default expanded
+                if (!_foldoutStates.ContainsKey(comp.Key))
+                    _foldoutStates[comp.Key] = true; // default expanded
 
-                foldouts[comp.Key] = GUILayout.Toggle(foldouts[comp.Key], "<b>" + comp.Key + "</b>", _foldoutStyle);
-                if (foldouts[comp.Key])
+                _foldoutStates[comp.Key] = GUILayout.Toggle(_foldoutStates[comp.Key], "<b>" + comp.Key + "</b>", _foldoutStyle);
+                if (_foldoutStates[comp.Key])
                 {
                     GUILayout.BeginVertical(GUI.skin.box);
                     DrawSimpleParametersForComponent(comp.Key, comp.Value);
+                    if (comp.Key == "Light")
+                    {
+                        GUILayout.Space(5);
+                        GUILayout.Label("Color Preview:", _labelStyle);
+                        float r = 1f, g = 1f, b = 1f, a = 1f;
+                        if (comp.Value.ContainsKey("r")) float.TryParse(comp.Value["r"], out r);
+                        if (comp.Value.ContainsKey("g")) float.TryParse(comp.Value["g"], out g);
+                        if (comp.Value.ContainsKey("b")) float.TryParse(comp.Value["b"], out b);
+                        if (comp.Value.ContainsKey("a")) float.TryParse(comp.Value["a"], out a);
+                        Color previewColor = new Color(r, g, b, a);
+                        Texture2D previewTex = new Texture2D(30, 30, TextureFormat.RGBA32, false);
+                        previewTex.filterMode = FilterMode.Bilinear;
+                        previewTex.wrapMode = TextureWrapMode.Clamp;
+                        Color[] pixels = new Color[30 * 30];
+                        for (int i = 0; i < pixels.Length; i++)
+                            pixels[i] = previewColor;
+                        previewTex.SetPixels(pixels);
+                        previewTex.Apply();
+                        GUILayout.Box(previewTex, GUILayout.Width(30), GUILayout.Height(30));
+                    }
                     GUILayout.EndVertical();
                 }
                 GUILayout.Space(10);
@@ -373,7 +437,8 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Helper to draw parameters for one component (used in tree view).
+        /// Helper method to draw parameter controls for one component.
+        /// Used by both flat and tree view Advanced layouts.
         /// </summary>
         private void DrawSimpleParametersForComponent(string compName, Dictionary<string, string> fields)
         {
@@ -392,18 +457,12 @@ namespace SledTunerProject
                     float newVal = GUILayout.HorizontalSlider(currentVal, sliderMin, sliderMax, GUILayout.Width(150));
                     string newText = GUILayout.TextField(newVal.ToString("F2"), _textFieldStyle, GUILayout.Width(50));
                     if (float.TryParse(newText, out float parsedVal))
-                    {
                         newVal = parsedVal;
-                    }
                     GUILayout.BeginHorizontal(GUILayout.Width(60));
                     if (GUILayout.Button("-", _buttonStyle, GUILayout.Width(25)))
-                    {
                         newVal = Mathf.Max(sliderMin, newVal - step);
-                    }
                     if (GUILayout.Button("+", _buttonStyle, GUILayout.Width(25)))
-                    {
                         newVal = Mathf.Min(sliderMax, newVal + step);
-                    }
                     GUILayout.EndHorizontal();
                     string finalValStr = newVal.ToString();
                     if (finalValStr != field.Value)
@@ -412,9 +471,7 @@ namespace SledTunerProject
                         object convertedValue = ConvertInput(finalValStr, fieldType);
                         _sledParameterManager.SetFieldValue(compName, field.Key, convertedValue);
                         if (!_manualApply)
-                        {
                             _sledParameterManager.ApplyParameters();
-                        }
                     }
                 }
                 else if (fieldType == typeof(bool))
@@ -438,9 +495,7 @@ namespace SledTunerProject
                         object conv = ConvertInput(newValue, fieldType);
                         _sledParameterManager.SetFieldValue(compName, field.Key, conv);
                         if (!_manualApply)
-                        {
                             _sledParameterManager.ApplyParameters();
-                        }
                     }
                 }
                 GUILayout.EndHorizontal();
@@ -448,66 +503,22 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Draw a live preview of the headlight color using the Light component’s RGBA values.
-        /// The preview is drawn as a fixed 30×30 rectangle.
-        /// </summary>
-        private void DrawLightColorPreview()
-        {
-            // Retrieve the current RGBA values from SledParameterManager.
-            float r = GetFieldFloat("Light", "r", 1f);
-            float g = GetFieldFloat("Light", "g", 1f);
-            float b = GetFieldFloat("Light", "b", 1f);
-            float a = GetFieldFloat("Light", "a", 1f);
-            Color currentColor = new Color(r, g, b, a);
-
-            // Create or update the preview texture (1x1 pixel).
-            if (_colorPreviewTexture == null)
-            {
-                _colorPreviewTexture = new Texture2D(1, 1);
-                _colorPreviewTexture.hideFlags = HideFlags.HideAndDontSave;
-            }
-            _colorPreviewTexture.SetPixel(0, 0, currentColor);
-            _colorPreviewTexture.Apply();
-
-            // Draw the texture in a fixed 30×30 rect (similar to the size of window control buttons).
-            Rect previewRect = GUILayoutUtility.GetRect(30, 30, GUILayout.ExpandWidth(false));
-            GUI.DrawTexture(previewRect, _colorPreviewTexture, ScaleMode.StretchToFill);
-        }
-
-        /// <summary>
-        /// Helper method to get a float value from SledParameterManager for a given field.
-        /// </summary>
-        private float GetFieldFloat(string compName, string fieldName, float defaultValue)
-        {
-            object obj = _sledParameterManager.GetFieldValue(compName, fieldName);
-            if (obj != null && float.TryParse(obj.ToString(), out float val))
-                return val;
-            return defaultValue;
-        }
-
-        /// <summary>
-        /// Draw the footer that contains extra toggle buttons and a Teleport button.
+        /// Draws the footer with extra toggle buttons (Ragdoll, Tree Renderer) and a Teleport button.
         /// </summary>
         private void DrawFooter()
         {
             GUILayout.BeginHorizontal();
             if (GUILayout.Button("Toggle Ragdoll", _buttonStyle, GUILayout.Width(120)))
-            {
                 _configManager.ToggleRagdoll();
-            }
             if (GUILayout.Button("Toggle Tree Renderer", _buttonStyle, GUILayout.Width(150)))
-            {
                 _configManager.ToggleTreeRenderer();
-            }
             if (GUILayout.Button("Teleport", _buttonStyle, GUILayout.Width(100)))
-            {
                 _configManager.TeleportSled();
-            }
             GUILayout.EndHorizontal();
         }
 
         /// <summary>
-        /// Draw an opacity slider to adjust the menu’s transparency.
+        /// Draws an opacity slider to adjust the menu's transparency.
         /// </summary>
         private void DrawOpacitySlider()
         {
@@ -520,7 +531,7 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Apply all current GUI values to SledParameterManager.
+        /// Applies all current GUI values to the SledParameterManager.
         /// </summary>
         private void ApplyChanges()
         {
@@ -543,7 +554,7 @@ namespace SledTunerProject
         // === UTILITY METHODS ===
 
         /// <summary>
-        /// Converts a string input to the target type.
+        /// Converts a string input to the specified target type.
         /// </summary>
         private object ConvertInput(string input, Type targetType)
         {
@@ -569,7 +580,65 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Handle window resizing by checking if the mouse is near the edges.
+        /// Draws a slider, text field, and plus/minus buttons for a numeric value.
+        /// (Used in Simple view.)
+        /// </summary>
+        private float FloatFieldWithSlider(float currentVal, float min, float max, float step)
+        {
+            float newVal = GUILayout.HorizontalSlider(currentVal, min, max, GUILayout.Width(150));
+            string textVal = GUILayout.TextField(newVal.ToString("F2"), GUILayout.Width(50));
+            if (float.TryParse(textVal, out float parsed))
+                newVal = parsed;
+            GUILayout.BeginHorizontal(GUILayout.Width(60));
+            if (GUILayout.Button("-", _buttonStyle, GUILayout.Width(25)))
+                newVal = Mathf.Max(min, newVal - step);
+            if (GUILayout.Button("+", _buttonStyle, GUILayout.Width(25)))
+                newVal = Mathf.Min(max, newVal + step);
+            GUILayout.EndHorizontal();
+            return newVal;
+        }
+
+        /// <summary>
+        /// Draws a labeled slider with plus/minus buttons for a numeric value.
+        /// (Used for headlight color channels in Simple view.)
+        /// </summary>
+        private float FloatFieldWithSliderWithButtons(string label, float currentVal, float min, float max, float step)
+        {
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(label + ":", GUILayout.Width(20));
+            float newVal = GUILayout.HorizontalSlider(currentVal, min, max, GUILayout.Width(150));
+            string textVal = GUILayout.TextField(newVal.ToString("F2"), _textFieldStyle, GUILayout.Width(40));
+            if (float.TryParse(textVal, out float parsed))
+                newVal = parsed;
+            if (GUILayout.Button("-", _buttonStyle, GUILayout.Width(25)))
+                newVal = Mathf.Max(min, newVal - step);
+            if (GUILayout.Button("+", _buttonStyle, GUILayout.Width(25)))
+                newVal = Mathf.Min(max, newVal + step);
+            GUILayout.EndHorizontal();
+            return newVal;
+        }
+
+        /// <summary>
+        /// Resets the Simple view parameters to their original defaults.
+        /// </summary>
+        private void ResetValues()
+        {
+            speed = 10f;
+            gravity = originalGravity;
+            power = originalPower;
+            lugHeight = originalLugHeight;
+            trackLength = originalTrackLength;
+            pitchFactor = originalPitchFactor;
+            lightR = 1f;
+            lightG = 1f;
+            lightB = 1f;
+            lightA = 1f;
+            notdriverInvincible = true;
+            test = false;
+        }
+
+        /// <summary>
+        /// Handles freeform window resizing via mouse events.
         /// </summary>
         private void HandleResize()
         {
@@ -634,6 +703,7 @@ namespace SledTunerProject
         {
             if (!_isMinimized)
             {
+                // Collapse to a toolbar in the top-right corner with 10px margins.
                 _prevWindowRect = _windowRect;
                 _windowRect = new Rect(Screen.width - 150f - 10f, 10f, 150f, 30f);
                 _isMinimized = true;
@@ -666,7 +736,7 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Draw a help panel with usage instructions.
+        /// Draws a help panel with usage instructions.
         /// </summary>
         private void DrawHelpPanel()
         {
@@ -678,7 +748,8 @@ namespace SledTunerProject
                 "  - If 'Manual Apply' is enabled, changes take effect only after pressing 'Apply'.\n" +
                 "  - Use the window buttons to Minimize, Maximize, or Close the menu.\n" +
                 "  - Footer buttons include toggles for Ragdoll, Tree Renderer, and Teleport.\n" +
-                "  - 'Advanced View' reveals additional options (if available).\n", _labelStyle);
+                "  - In Advanced view, use the 'Tree View' toggle to collapse or expand components.\n" +
+                "  - 'Switch View' toggles between Advanced and Simple tuner menus.\n", _labelStyle);
             GUILayout.EndVertical();
         }
     }
