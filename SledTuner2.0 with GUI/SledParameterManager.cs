@@ -57,7 +57,7 @@ namespace SledTunerProject
                 {
                     // Removed "driverMaxDistanceHighStance", "driverMaxDistanceLowStance", "driverMaxDistanceSwitchBack"
                     "skisMaxAngle", "driverZCenter", "enableVerticalWeightTransfer", "trailLeanDistance", "switchbackTransitionTime",
-                    "horizontalWeightTransferMode", "toeAngle", "hopOverPreJump", "switchBackLeanDistance"
+                    "toeAngle", "hopOverPreJump", "switchBackLeanDistance"
                 },
                 ["MeshInterpretter"] = new string[]
                 {
@@ -144,7 +144,6 @@ namespace SledTunerProject
                 ["enableVerticalWeightTransfer"] = new ParameterMetadata("Vertical Weight Transfer", "Enable vertical weight transfer", 0f, 1f, ControlType.Toggle),
                 ["trailLeanDistance"] = new ParameterMetadata("Trail Lean Distance", "Distance for trail leaning", 0f, 10f),
                 ["switchbackTransitionTime"] = new ParameterMetadata("Switchback Transition Time", "Time to transition during a switchback", 0.1f, 1f),
-                ["horizontalWeightTransferMode"] = new ParameterMetadata("Horizontal Weight Transfer Mode", "Mode for horizontal weight transfer", 0f, 1f),
                 ["toeAngle"] = new ParameterMetadata("Toe Angle", "Angle of the toe", 0f, 90f),
                 ["hopOverPreJump"] = new ParameterMetadata("Hop Over Pre-Jump", "Pre-jump hop adjustment", -1f, 1f),
                 ["switchBackLeanDistance"] = new ParameterMetadata("Switchback Lean Distance", "Distance for lean during switchback", 0f, 5f)
