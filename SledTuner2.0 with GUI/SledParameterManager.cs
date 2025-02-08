@@ -7,9 +7,6 @@ using UnityEngine;
 
 namespace SledTunerProject
 {
-    // public enum ControlType { Slider, Toggle, ... }
-    // public class ParameterMetadata { ... }
-
     public class SledParameterManager
     {
         // Public properties and fields
@@ -574,13 +571,23 @@ namespace SledTunerProject
                 return null;
 
             if (compName == "Rigidbody")
+            {
                 return _snowmobileBody.GetComponent<Rigidbody>();
+            }
             else if (compName == "Light")
             {
                 Transform t = _snowmobileBody.transform.Find("Spot Light");
                 if (t != null)
                     return t.GetComponent<Light>();
                 return null;
+            }
+            else if (compName == "RagDollCollisionController" || compName == "RagDollManager")
+            {
+                // Locate "IK Player (Drivers)" under the Body
+                Transform ikPlayer = _snowmobileBody.transform.Find("IK Player (Drivers)");
+                if (ikPlayer == null)
+                    return null;
+                return ikPlayer.GetComponent(compName);
             }
             else
             {
