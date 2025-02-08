@@ -591,30 +591,29 @@ namespace SledTunerProject
             }
             else if (compName == "Shock")
             {
-                // Locate the Shock under the Front and/or Rear suspension
-                // We'll return whichever one we find first
-                Transform frontShock = _snowmobileBody.transform.Find("Front Suspension/Shock");
-                if (frontShock != null)
+                // Locate the Front Suspension object
+                Transform frontSuspension = _snowmobileBody.transform.Find("Front Suspension");
+                if (frontSuspension != null)
                 {
-                    Component shockComponent = frontShock.GetComponent(compName);
-                    if (shockComponent != null)
-                        return shockComponent;
+                    Component shockComp = frontSuspension.GetComponent(compName);
+                    if (shockComp != null)
+                        return shockComp;
                 }
 
-                Transform rearShock = _snowmobileBody.transform.Find("Rear Suspension/Shock");
-                if (rearShock != null)
+                // Locate the Rear Suspension object
+                Transform rearSuspension = _snowmobileBody.transform.Find("Rear Suspension");
+                if (rearSuspension != null)
                 {
-                    Component shockComponent = rearShock.GetComponent(compName);
-                    if (shockComponent != null)
-                        return shockComponent;
+                    Component shockComp = rearSuspension.GetComponent(compName);
+                    if (shockComp != null)
+                        return shockComp;
                 }
 
                 return null;
             }
-            else
-            {
-                return _snowmobileBody.GetComponent(compName);
-            }
+
+            // Add a default return statement to handle any other cases
+            return _snowmobileBody.GetComponent(compName);
         }
 
         private void ApplyField(string compName, string fieldName, object value)
