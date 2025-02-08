@@ -372,7 +372,7 @@ namespace SledTunerProject
 
         /// <summary>
         /// Draws a row of parameter controls for each field within the specified component.
-        /// Now includes handling for Vector2, Vector3, and Vector4 types.
+        /// Now includes handling for Vector2, Vector3, Vector4, and double types.
         /// </summary>
         private void DrawSimpleParametersForComponent(string compName, Dictionary<string, string> fields)
         {
@@ -386,29 +386,35 @@ namespace SledTunerProject
                 string fieldStringVal = field.Value;
                 object fieldObj = ConvertFieldObject(compName, field.Key, fieldStringVal);
 
-                if (fieldType == typeof(float) || fieldType == typeof(int))
+                // === NEW: Handle float/int/double together ===
+                if (fieldType == typeof(float) || fieldType == typeof(int) || fieldType == typeof(double))
                 {
-                    float currentVal = 0f;
-                    float.TryParse(field.Value, out currentVal);
+                    double currentVal = 0.0;
+                    double.TryParse(field.Value, out currentVal);
+
                     float sliderMin = _sledParameterManager.GetSliderMin(compName, field.Key);
                     float sliderMax = _sledParameterManager.GetSliderMax(compName, field.Key);
-                    float step = (fieldType == typeof(float)) ? 0.1f : 1f;
-                    float newVal = GUILayout.HorizontalSlider(currentVal, sliderMin, sliderMax, GUILayout.Width(150));
-                    string newText = GUILayout.TextField(newVal.ToString("F2"), _textFieldStyle, GUILayout.Width(50));
+                    double step = (fieldType == typeof(int)) ? 1.0 : 0.1;
+
+                    // Draw slider as float, but keep double behind the scenes
+                    float newValFloat = GUILayout.HorizontalSlider((float)currentVal, sliderMin, sliderMax, GUILayout.Width(150));
+                    string newText = GUILayout.TextField(newValFloat.ToString("F2"), _textFieldStyle, GUILayout.Width(50));
                     if (float.TryParse(newText, out float parsedVal))
-                        newVal = parsedVal;
+                        newValFloat = parsedVal;
+
                     GUILayout.BeginHorizontal(GUILayout.Width(60));
                     if (GUILayout.Button("-", _buttonStyle, GUILayout.Width(25)))
-                        newVal = Mathf.Max(sliderMin, newVal - step);
+                        newValFloat = Mathf.Max(sliderMin, newValFloat - (float)step);
                     if (GUILayout.Button("+", _buttonStyle, GUILayout.Width(25)))
-                        newVal = Mathf.Min(sliderMax, newVal + step);
+                        newValFloat = Mathf.Min(sliderMax, newValFloat + (float)step);
                     GUILayout.EndHorizontal();
-                    string finalValStr = newVal.ToString();
-                    if (finalValStr != field.Value)
+
+                    double finalVal = (double)newValFloat;
+                    // If the string representation differs, update
+                    if (finalVal.ToString() != field.Value)
                     {
-                        _fieldInputs[compName][field.Key] = finalValStr;
-                        object convertedValue = ConvertInput(finalValStr, fieldType);
-                        _sledParameterManager.SetFieldValue(compName, field.Key, convertedValue);
+                        _fieldInputs[compName][field.Key] = finalVal.ToString();
+                        _sledParameterManager.SetFieldValue(compName, field.Key, finalVal);
                         if (!_manualApply)
                             _sledParameterManager.ApplyParameters();
                     }
@@ -673,6 +679,12 @@ namespace SledTunerProject
                 if (bool.TryParse(input, out bool b))
                     return b;
                 return false;
+            }
+            else if (targetType == typeof(double))
+            {
+                if (double.TryParse(input, out double d))
+                    return d;
+                return 0.0;
             }
             else if (targetType == typeof(Vector2))
             {
