@@ -43,6 +43,7 @@ namespace SledTunerProject
         public SledParameterManager()
         {
             // Define the components and the field names to inspect.
+            // We have removed the vector fields and "hard"/"soft" as requested.
             ComponentsToInspect = new Dictionary<string, string[]>
             {
                 ["SnowmobileController"] = new string[]
@@ -54,8 +55,8 @@ namespace SledTunerProject
                 },
                 ["SnowmobileControllerBase"] = new string[]
                 {
+                    // Removed "driverMaxDistanceHighStance", "driverMaxDistanceLowStance", "driverMaxDistanceSwitchBack"
                     "skisMaxAngle", "driverZCenter", "enableVerticalWeightTransfer", "trailLeanDistance", "switchbackTransitionTime",
-                    "driverMaxDistanceHighStance", "driverMaxDistanceLowStance", "driverMaxDistanceSwitchBack",
                     "horizontalWeightTransferMode", "toeAngle", "hopOverPreJump", "switchBackLeanDistance"
                 },
                 ["MeshInterpretter"] = new string[]
@@ -88,13 +89,9 @@ namespace SledTunerProject
                 ["Light"] = new string[] { "r", "g", "b", "a" },
                 ["Shock"] = new string[]
                 {
-                    "compression",
-                    "hard",
-                    "soft",
-                    "mass",
-                    "maxCompression",
-                    "velocity"
-                    // ... plus any other fields you want
+                    // Removed "hard" and "soft" as requested; leaving only the original fields below
+                    "springFactor", "damperFactor", "fastCompressionVelocityThreshold", "fastReboundVelocityThreshold",
+                    "compressionRatio", "compressionFastRatio", "reboundRatio", "reboundFastRatio"
                 }
             };
 
@@ -141,14 +138,12 @@ namespace SledTunerProject
 
             _parameterMetadata["SnowmobileControllerBase"] = new Dictionary<string, ParameterMetadata>
             {
+                // removed the driverMaxDistance vector fields
                 ["skisMaxAngle"] = new ParameterMetadata("Skis Max Angle", "Maximum angle of the skis", 0f, 90f),
                 ["driverZCenter"] = new ParameterMetadata("Driver Z Center", "Vertical center offset for driver", -1f, 1f),
                 ["enableVerticalWeightTransfer"] = new ParameterMetadata("Vertical Weight Transfer", "Enable vertical weight transfer", 0f, 1f, ControlType.Toggle),
                 ["trailLeanDistance"] = new ParameterMetadata("Trail Lean Distance", "Distance for trail leaning", 0f, 10f),
                 ["switchbackTransitionTime"] = new ParameterMetadata("Switchback Transition Time", "Time to transition during a switchback", 0.1f, 1f),
-                ["driverMaxDistanceHighStance"] = new ParameterMetadata("Driver Max Distance (High Stance)", "Maximum driver distance in high stance", 0f, 2f),
-                ["driverMaxDistanceLowStance"] = new ParameterMetadata("Driver Max Distance (Low Stance)", "Maximum driver distance in low stance", 0f, 2f),
-                ["driverMaxDistanceSwitchBack"] = new ParameterMetadata("Driver Max Distance (Switchback)", "Driver distance during switchback", 0f, 2f),
                 ["horizontalWeightTransferMode"] = new ParameterMetadata("Horizontal Weight Transfer Mode", "Mode for horizontal weight transfer", 0f, 1f),
                 ["toeAngle"] = new ParameterMetadata("Toe Angle", "Angle of the toe", 0f, 90f),
                 ["hopOverPreJump"] = new ParameterMetadata("Hop Over Pre-Jump", "Pre-jump hop adjustment", -1f, 1f),
@@ -171,8 +166,8 @@ namespace SledTunerProject
                 ["snowOutTrackWidth"] = new ParameterMetadata("Snow Out Track Width", "Track width outside of snow", 0f, 5f),
                 ["pitchFactor"] = new ParameterMetadata("Pitch Factor", "Factor affecting pitch", 0f, 200f),
                 ["drivetrainMinSpeed"] = new ParameterMetadata("Drivetrain Min Speed", "Minimum speed for drivetrain", 0f, 50f),
-                ["drivetrainMaxSpeed1"] = new ParameterMetadata("Drivetrain Max Speed 1", "Maximum speed for drivetrain configuration 1", 0f, 100f),
-                ["drivetrainMaxSpeed2"] = new ParameterMetadata("Drivetrain Max Speed 2", "Maximum speed for drivetrain configuration 2", 0f, 500f)
+                ["drivetrainMaxSpeed1"] = new ParameterMetadata("Drivetrain Max Speed 1", "Max speed for drivetrain config 1", 0f, 100f),
+                ["drivetrainMaxSpeed2"] = new ParameterMetadata("Drivetrain Max Speed 2", "Max speed for drivetrain config 2", 0f, 500f)
             };
 
             _parameterMetadata["SnowParameters"] = new Dictionary<string, ParameterMetadata>
@@ -228,6 +223,7 @@ namespace SledTunerProject
 
             _parameterMetadata["Shock"] = new Dictionary<string, ParameterMetadata>
             {
+                // "hard" and "soft" have been removed as requested
                 ["springFactor"] = new ParameterMetadata("Spring Factor", "Spring factor for shock", 0f, 20000f),
                 ["damperFactor"] = new ParameterMetadata("Damper Factor", "Damper factor for shock", 0f, 2000f),
                 ["fastCompressionVelocityThreshold"] = new ParameterMetadata("Fast Compression Velocity Threshold", "Threshold for fast compression", 0f, 10f),
@@ -429,13 +425,15 @@ namespace SledTunerProject
                     {
                         MemberWrapper wrapper = new MemberWrapper();
 
+                        // Special case for Light color channels
                         if (compName == "Light" &&
                             (field == "r" || field == "g" || field == "b" || field == "a"))
                         {
-                            // We'll handle color channels manually
+                            // We'll handle color channels manually in some places
                         }
                         else
                         {
+                            // Try to find a FieldInfo
                             FieldInfo fi = type.GetField(field,
                                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                             if (fi != null)
@@ -444,6 +442,7 @@ namespace SledTunerProject
                             }
                             else
                             {
+                                // Try to find a PropertyInfo
                                 PropertyInfo pi = type.GetProperty(field,
                                     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                                 if (pi != null)
@@ -507,6 +506,7 @@ namespace SledTunerProject
 
         private object TryReadMember(Component comp, string compName, string fieldName)
         {
+            // Special handling for Light color channels
             if (compName == "Light" &&
                 (fieldName == "r" || fieldName == "g" || fieldName == "b" || fieldName == "a"))
             {
@@ -515,16 +515,11 @@ namespace SledTunerProject
 
                 switch (fieldName)
                 {
-                    case "r":
-                        return c.r;
-                    case "g":
-                        return c.g;
-                    case "b":
-                        return c.b;
-                    case "a":
-                        return c.a;
-                    default:
-                        return "(Not found: " + fieldName + ")";
+                    case "r": return c.r;
+                    case "g": return c.g;
+                    case "b": return c.b;
+                    case "a": return c.a;
+                    default: return "(Not found: " + fieldName + ")";
                 }
             }
 
@@ -553,12 +548,15 @@ namespace SledTunerProject
             if (raw == null)
                 return null;
 
+            // If it's a UnityEngine.Object, skip
             if (fieldType != null && typeof(UnityEngine.Object).IsAssignableFrom(fieldType))
                 return "(Skipped UnityEngine.Object)";
 
+            // If it's an enum, just return it (or you could convert to string)
             if (fieldType != null && fieldType.IsEnum)
                 return raw;
 
+            // If it's not a primitive/string/decimal/enum, skip
             if (fieldType != null && !fieldType.IsPrimitive
                 && fieldType != typeof(string)
                 && fieldType != typeof(decimal)
@@ -567,6 +565,7 @@ namespace SledTunerProject
                 return "(Skipped complex type)";
             }
 
+            // Otherwise, it’s a numeric/bool/string/decimal/enum => return as is
             return raw;
         }
 
@@ -596,7 +595,7 @@ namespace SledTunerProject
             }
             else if (compName == "Shock")
             {
-                // Locate the Front Suspension object
+                // This searches front, then rear
                 Transform frontSuspension = _snowmobileBody.transform.Find("Front Suspension");
                 if (frontSuspension != null)
                 {
@@ -604,8 +603,6 @@ namespace SledTunerProject
                     if (shockComp != null)
                         return shockComp;
                 }
-
-                // Locate the Rear Suspension object
                 Transform rearSuspension = _snowmobileBody.transform.Find("Rear Suspension");
                 if (rearSuspension != null)
                 {
@@ -613,12 +610,12 @@ namespace SledTunerProject
                     if (shockComp != null)
                         return shockComp;
                 }
-
                 return null;
             }
-
-            // Add a default return statement to handle any other cases
-            return _snowmobileBody.GetComponent(compName);
+            else
+            {
+                return _snowmobileBody.GetComponent(compName);
+            }
         }
 
         private void ApplyField(string compName, string fieldName, object value)
@@ -627,6 +624,7 @@ namespace SledTunerProject
             if (comp == null)
                 return;
 
+            // Special handling for Light color channels
             if (compName == "Light" &&
                 (fieldName == "r" || fieldName == "g" || fieldName == "b" || fieldName == "a"))
             {
