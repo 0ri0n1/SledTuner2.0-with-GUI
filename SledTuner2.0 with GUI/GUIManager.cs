@@ -370,6 +370,10 @@ namespace SledTunerProject
             }
         }
 
+        /// <summary>
+        /// Draws a row of parameter controls for each field within the specified component.
+        /// Now includes handling for Vector2, Vector3, and Vector4 types.
+        /// </summary>
         private void DrawSimpleParametersForComponent(string compName, Dictionary<string, string> fields)
         {
             foreach (var field in fields)
@@ -377,6 +381,11 @@ namespace SledTunerProject
                 GUILayout.BeginHorizontal();
                 GUILayout.Label(field.Key + ":", _labelStyle, GUILayout.Width(150));
                 Type fieldType = _sledParameterManager.GetFieldType(compName, field.Key);
+
+                // Get the actual object from the field inputs (which may be string-based)
+                string fieldStringVal = field.Value;
+                object fieldObj = ConvertFieldObject(compName, field.Key, fieldStringVal);
+
                 if (fieldType == typeof(float) || fieldType == typeof(int))
                 {
                     float currentVal = 0f;
@@ -416,8 +425,54 @@ namespace SledTunerProject
                         _sledParameterManager.ApplyParameters();
                     }
                 }
+                else if (fieldType == typeof(Vector2))
+                {
+                    // Handle Vector2
+                    Vector2 vectorVal = (fieldObj is Vector2) ? (Vector2)fieldObj : Vector2.zero;
+                    Vector2 newVec = DrawVector2Field(vectorVal);
+                    if (newVec != vectorVal)
+                    {
+                        // Store as "x,y"
+                        string vectorString = $"{newVec.x},{newVec.y}";
+                        _fieldInputs[compName][field.Key] = vectorString;
+                        _sledParameterManager.SetFieldValue(compName, field.Key, newVec);
+                        if (!_manualApply)
+                            _sledParameterManager.ApplyParameters();
+                    }
+                }
+                else if (fieldType == typeof(Vector3))
+                {
+                    // Handle Vector3
+                    Vector3 vectorVal = (fieldObj is Vector3) ? (Vector3)fieldObj : Vector3.zero;
+                    Vector3 newVec = DrawVector3Field(vectorVal);
+                    if (newVec != vectorVal)
+                    {
+                        // Store as "x,y,z"
+                        string vectorString = $"{newVec.x},{newVec.y},{newVec.z}";
+                        _fieldInputs[compName][field.Key] = vectorString;
+                        _sledParameterManager.SetFieldValue(compName, field.Key, newVec);
+                        if (!_manualApply)
+                            _sledParameterManager.ApplyParameters();
+                    }
+                }
+                else if (fieldType == typeof(Vector4))
+                {
+                    // Handle Vector4
+                    Vector4 vectorVal = (fieldObj is Vector4) ? (Vector4)fieldObj : Vector4.zero;
+                    Vector4 newVec = DrawVector4Field(vectorVal);
+                    if (newVec != vectorVal)
+                    {
+                        // Store as "x,y,z,w"
+                        string vectorString = $"{newVec.x},{newVec.y},{newVec.z},{newVec.w}";
+                        _fieldInputs[compName][field.Key] = vectorString;
+                        _sledParameterManager.SetFieldValue(compName, field.Key, newVec);
+                        if (!_manualApply)
+                            _sledParameterManager.ApplyParameters();
+                    }
+                }
                 else
                 {
+                    // Fallback to default text field
                     string newValue = GUILayout.TextField(field.Value, _textFieldStyle, GUILayout.ExpandWidth(true));
                     if (newValue != field.Value)
                     {
@@ -430,6 +485,133 @@ namespace SledTunerProject
                 }
                 GUILayout.EndHorizontal();
             }
+        }
+
+        /// <summary>
+        /// Draws a Vector2 field with sliders and +/- buttons for each axis.
+        /// </summary>
+        private Vector2 DrawVector2Field(Vector2 currentVal)
+        {
+            float x = DrawSingleFloatField("X", currentVal.x, -1000f, 1000f, 0.1f, 70f);
+            float y = DrawSingleFloatField("Y", currentVal.y, -1000f, 1000f, 0.1f, 70f);
+            return new Vector2(x, y);
+        }
+
+        /// <summary>
+        /// Draws a Vector3 field with sliders and +/- buttons for each axis.
+        /// </summary>
+        private Vector3 DrawVector3Field(Vector3 currentVal)
+        {
+            float x = DrawSingleFloatField("X", currentVal.x, -1000f, 1000f, 0.1f, 70f);
+            float y = DrawSingleFloatField("Y", currentVal.y, -1000f, 1000f, 0.1f, 70f);
+            float z = DrawSingleFloatField("Z", currentVal.z, -1000f, 1000f, 0.1f, 70f);
+            return new Vector3(x, y, z);
+        }
+
+        /// <summary>
+        /// Draws a Vector4 field with sliders and +/- buttons for each axis.
+        /// </summary>
+        private Vector4 DrawVector4Field(Vector4 currentVal)
+        {
+            float x = DrawSingleFloatField("X", currentVal.x, -1000f, 1000f, 0.1f, 70f);
+            float y = DrawSingleFloatField("Y", currentVal.y, -1000f, 1000f, 0.1f, 70f);
+            float z = DrawSingleFloatField("Z", currentVal.z, -1000f, 1000f, 0.1f, 70f);
+            float w = DrawSingleFloatField("W", currentVal.w, -1000f, 1000f, 0.1f, 70f);
+            return new Vector4(x, y, z, w);
+        }
+
+        /// <summary>
+        /// Helper to draw a label, slider, text field, and +/- buttons for a single float component.
+        /// axisLabelWidth controls the width of the axis label (e.g. "X:" or "Y:").
+        /// </summary>
+        private float DrawSingleFloatField(string axisLabel, float value, float min, float max, float step, float axisLabelWidth)
+        {
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(axisLabel + ":", _labelStyle, GUILayout.Width(axisLabelWidth));
+            float sliderVal = GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(100));
+            string textVal = GUILayout.TextField(sliderVal.ToString("F2"), _textFieldStyle, GUILayout.Width(50));
+            if (float.TryParse(textVal, out float parsed))
+                sliderVal = parsed;
+            if (GUILayout.Button("-", _buttonStyle, GUILayout.Width(25)))
+                sliderVal = Mathf.Max(min, sliderVal - step);
+            if (GUILayout.Button("+", _buttonStyle, GUILayout.Width(25)))
+                sliderVal = Mathf.Min(max, sliderVal + step);
+            GUILayout.EndHorizontal();
+            return sliderVal;
+        }
+
+        /// <summary>
+        /// Converts the stored string in _fieldInputs to an actual object type (Vector2, Vector3, etc.) if needed.
+        /// </summary>
+        private object ConvertFieldObject(string compName, string fieldName, string fieldStringVal)
+        {
+            Type fieldType = _sledParameterManager.GetFieldType(compName, fieldName);
+            if (fieldType == typeof(Vector2))
+            {
+                if (TryParseVector2(fieldStringVal, out Vector2 v2))
+                    return v2;
+                return Vector2.zero;
+            }
+            else if (fieldType == typeof(Vector3))
+            {
+                if (TryParseVector3(fieldStringVal, out Vector3 v3))
+                    return v3;
+                return Vector3.zero;
+            }
+            else if (fieldType == typeof(Vector4))
+            {
+                if (TryParseVector4(fieldStringVal, out Vector4 v4))
+                    return v4;
+                return Vector4.zero;
+            }
+            return fieldStringVal;
+        }
+
+        private bool TryParseVector2(string input, out Vector2 vector)
+        {
+            vector = Vector2.zero;
+            if (string.IsNullOrEmpty(input)) return false;
+            string[] parts = input.Split(',');
+            if (parts.Length != 2) return false;
+            if (float.TryParse(parts[0], out float x) && float.TryParse(parts[1], out float y))
+            {
+                vector = new Vector2(x, y);
+                return true;
+            }
+            return false;
+        }
+
+        private bool TryParseVector3(string input, out Vector3 vector)
+        {
+            vector = Vector3.zero;
+            if (string.IsNullOrEmpty(input)) return false;
+            string[] parts = input.Split(',');
+            if (parts.Length != 3) return false;
+            if (float.TryParse(parts[0], out float x) &&
+                float.TryParse(parts[1], out float y) &&
+                float.TryParse(parts[2], out float z))
+            {
+                vector = new Vector3(x, y, z);
+                return true;
+            }
+            return false;
+        }
+
+        private bool TryParseVector4(string input, out Vector4 vector)
+        {
+            vector = Vector4.zero;
+            if (string.IsNullOrEmpty(input)) return false;
+            string[] parts = input.Split(',');
+            if (parts.Length != 4) return false;
+            if (float.TryParse(parts[0], out float x) &&
+                float.TryParse(parts[1], out float y) &&
+                float.TryParse(parts[2], out float z) &&
+                float.TryParse(parts[3], out float w))
+            {
+                vector = new Vector4(x, y, z, w);
+                return true;
+            }
+            return false;
         }
 
         private void DrawFooter()
@@ -491,6 +673,21 @@ namespace SledTunerProject
                 if (bool.TryParse(input, out bool b))
                     return b;
                 return false;
+            }
+            else if (targetType == typeof(Vector2))
+            {
+                if (TryParseVector2(input, out Vector2 v2)) return v2;
+                return Vector2.zero;
+            }
+            else if (targetType == typeof(Vector3))
+            {
+                if (TryParseVector3(input, out Vector3 v3)) return v3;
+                return Vector3.zero;
+            }
+            else if (targetType == typeof(Vector4))
+            {
+                if (TryParseVector4(input, out Vector4 v4)) return v4;
+                return Vector4.zero;
             }
             return input;
         }
