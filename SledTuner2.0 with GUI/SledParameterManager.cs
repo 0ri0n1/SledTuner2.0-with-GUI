@@ -88,8 +88,13 @@ namespace SledTunerProject
                 ["Light"] = new string[] { "r", "g", "b", "a" },
                 ["Shock"] = new string[]
                 {
-                    "springFactor", "damperFactor", "fastCompressionVelocityThreshold", "fastReboundVelocityThreshold",
-                    "compressionRatio", "compressionFastRatio", "reboundRatio", "reboundFastRatio"
+                    "compression",
+                    "hard",
+                    "soft",
+                    "mass",
+                    "maxCompression",
+                    "velocity"
+                    // ... plus any other fields you want
                 }
             };
 
