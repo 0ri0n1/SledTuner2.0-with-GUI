@@ -31,11 +31,9 @@ namespace SledTunerProject
 
         // === ADDITIONAL FEATURES STATE ===
         private bool _manualApply = true;         // If true, changes take effect only after pressing "Apply".
-        private bool _showHelp = false;             // Toggle for help panel.
-        // _advancedView = true means using the full tuner menu; false = simple tuner menu.
-        private bool _advancedView = true;
-        // Within Advanced view, _treeViewEnabled toggles collapsible (tree) layout.
-        private bool _treeViewEnabled = true;
+        private bool _showHelp = false;           // Toggle for help panel.
+        private bool _advancedView = true;        // _advancedView = true means using the full tuner menu; false = simple tuner menu.
+        private bool _treeViewEnabled = true;     // Within Advanced view, _treeViewEnabled toggles collapsible (tree) layout.
 
         // === WINDOW CONTROLS & RESIZING ===
         private bool _isMinimized = false;
@@ -44,7 +42,7 @@ namespace SledTunerProject
         private Vector2 _resizeStartMousePos;
         private Rect _resizeStartWindowRect;
         private ResizeEdges _resizeEdges;
-        private float _opacity = 1f;                // 0 (transparent) to 1 (opaque)
+        private float _opacity = 1f;              // 0 (transparent) to 1 (opaque)
 
         private struct ResizeEdges
         {
@@ -74,8 +72,6 @@ namespace SledTunerProject
         private float originalPitchFactor = 7f;
 
         // === COLOR PREVIEW TEXTURE ===
-        // This texture is used in both Advanced and Simple views.
-        // We will create a 30x30 texture filled with the preview color.
         private Texture2D _colorPreviewTexture;
 
         // === CONSTRUCTOR ===
@@ -83,12 +79,11 @@ namespace SledTunerProject
         {
             _sledParameterManager = sledParameterManager;
             _configManager = configManager;
-            // Initialize window to cover 60% of the screen, centered.
             _windowRect = new Rect(Screen.width * 0.2f, Screen.height * 0.2f,
-                                     Screen.width * 0.6f, Screen.height * 0.6f);
+                                   Screen.width * 0.6f, Screen.height * 0.6f);
             _resizeEdges = new ResizeEdges();
-            _advancedView = true;      // default to Advanced view
-            _treeViewEnabled = true;   // default to using collapsible (tree) layout in Advanced view
+            _advancedView = true;
+            _treeViewEnabled = true;
         }
 
         // === PUBLIC METHODS ===
@@ -129,11 +124,10 @@ namespace SledTunerProject
                     _fieldInputs[compName][field] = (val != null) ? val.ToString() : "(No data)";
                 }
             }
-            // Update persistent foldout states for Advanced (Tree) view.
             foreach (var comp in _fieldInputs.Keys)
             {
                 if (!_foldoutStates.ContainsKey(comp))
-                    _foldoutStates[comp] = true; // default expanded
+                    _foldoutStates[comp] = true;
             }
             MelonLogger.Msg("[GUIManager] Fields repopulated.");
         }
@@ -146,7 +140,6 @@ namespace SledTunerProject
             if (!_menuOpen)
                 return;
 
-            // Lazy initialize GUI styles (requires GUI.skin; do this in OnGUI)
             if (_windowStyle == null)
             {
                 _windowStyle = new GUIStyle(GUI.skin.window);
@@ -158,30 +151,21 @@ namespace SledTunerProject
                 _headerStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 14 };
             }
 
-            // Apply window opacity.
             Color prevColor = GUI.color;
             GUI.color = new Color(prevColor.r, prevColor.g, prevColor.b, _opacity);
 
-            // Draw the window.
             _windowRect = GUILayout.Window(1234, _windowRect, WindowFunction, "SledTuner Menu", _windowStyle);
 
-            GUI.color = prevColor; // restore original color
-
-            // Handle window resizing.
+            GUI.color = prevColor;
             HandleResize();
         }
 
         // === PRIVATE GUI DRAWING METHODS ===
 
-        /// <summary>
-        /// Main window function that draws the contents.
-        /// Chooses between Advanced and Simple tuner menus.
-        /// </summary>
         private void WindowFunction(int windowID)
         {
             if (_isMinimized)
             {
-                // When minimized, only show the title bar.
                 DrawTitleBar();
                 GUI.DragWindow(new Rect(0, 0, _windowRect.width, 20));
                 return;
@@ -202,9 +186,6 @@ namespace SledTunerProject
             GUI.DragWindow(new Rect(0, 0, 10000, 20));
         }
 
-        /// <summary>
-        /// Draws the title bar with header, window control buttons, and a "Switch View" button.
-        /// </summary>
         private void DrawTitleBar()
         {
             GUILayout.BeginHorizontal();
@@ -231,9 +212,6 @@ namespace SledTunerProject
             }
         }
 
-        /// <summary>
-        /// Draws the configuration buttons: Load, Save, Reset, and Apply.
-        /// </summary>
         private void DrawConfigButtons()
         {
             GUILayout.BeginHorizontal();
@@ -262,12 +240,6 @@ namespace SledTunerProject
             GUILayout.EndHorizontal();
         }
 
-        /// <summary>
-        /// Draws the Advanced Tuner Menu.
-        /// In Advanced view, a row is added with "Manual Apply" and a "Tree View" toggle.
-        /// When Tree View is enabled, parameters are shown in collapsible groups;
-        /// otherwise, they are shown in a flat list.
-        /// </summary>
         private void DrawAdvancedTunerMenu()
         {
             DrawConfigButtons();
@@ -291,16 +263,12 @@ namespace SledTunerProject
             DrawOpacitySlider();
         }
 
-        /// <summary>
-        /// Draws the Simple Tuner Menu (mirroring the other mod's layout).
-        /// </summary>
         private void DrawSimpleTunerMenu()
         {
             GUILayout.BeginVertical();
             GUILayout.Label("Simple Tuner Menu", _headerStyle);
             GUILayout.Space(5);
 
-            // Top row: Apply toggle and Reset button.
             GUILayout.BeginHorizontal();
             apply = GUILayout.Toggle(apply, "Apply", _toggleStyle, GUILayout.Width(80));
             if (GUILayout.Button("Reset", _buttonStyle, GUILayout.Width(80)))
@@ -308,27 +276,21 @@ namespace SledTunerProject
             GUILayout.EndHorizontal();
             GUILayout.Space(10);
 
-            // FlySpeed control
             GUILayout.Label("FlySpeed");
             speed = FloatFieldWithSlider(speed, 0f, 200f, 0.1f);
 
-            // Gravity control
             GUILayout.Label("Gravity");
             gravity = FloatFieldWithSlider(gravity, -10f, 10f, 0.1f);
 
-            // Power control
             GUILayout.Label("Power");
             power = FloatFieldWithSlider(power, 0f, 300000f, 1000f);
 
-            // Lug Height control
             GUILayout.Label("Lug Height");
             lugHeight = FloatFieldWithSlider(lugHeight, 0f, 2f, 0.01f);
 
-            // Track Length control
             GUILayout.Label("Track Length");
             trackLength = FloatFieldWithSlider(trackLength, 0.5f, 2f, 0.01f);
 
-            // Pitch Factor control
             GUILayout.Label("Pitch Factor");
             pitchFactor = FloatFieldWithSlider(pitchFactor, 2f, 30f, 0.1f);
 
@@ -341,17 +303,9 @@ namespace SledTunerProject
 
             GUILayout.Space(5);
             GUILayout.Label("Color Preview:");
-            // Create a 30x30 texture filled with the current headlight color.
-            Texture2D preview = new Texture2D(30, 30, TextureFormat.RGBA32, false);
-            preview.filterMode = FilterMode.Bilinear;
-            preview.wrapMode = TextureWrapMode.Clamp;
             Color currentColor = new Color(lightR, lightG, lightB, lightA);
-            Color[] pixels = new Color[30 * 30];
-            for (int i = 0; i < pixels.Length; i++)
-                pixels[i] = currentColor;
-            preview.SetPixels(pixels);
-            preview.Apply();
-            GUILayout.Box(preview, GUILayout.Width(30), GUILayout.Height(30));
+            UpdateColorPreviewTexture(currentColor);
+            GUILayout.Box(_colorPreviewTexture, GUILayout.Width(30), GUILayout.Height(30));
 
             GUILayout.Space(10);
             notdriverInvincible = GUILayout.Toggle(notdriverInvincible, "Driver Ragdoll", _toggleStyle, GUILayout.Width(150));
@@ -362,9 +316,6 @@ namespace SledTunerProject
             GUILayout.EndVertical();
         }
 
-        /// <summary>
-        /// Draws a flat list of parameters for Advanced view (when Tree View toggle is off).
-        /// </summary>
         private void DrawAdvancedFlatParameters()
         {
             foreach (var comp in _fieldInputs)
@@ -381,29 +332,19 @@ namespace SledTunerProject
                     if (comp.Value.ContainsKey("b")) float.TryParse(comp.Value["b"], out b);
                     if (comp.Value.ContainsKey("a")) float.TryParse(comp.Value["a"], out a);
                     Color previewColor = new Color(r, g, b, a);
-                    Texture2D previewTex = new Texture2D(30, 30, TextureFormat.RGBA32, false);
-                    previewTex.filterMode = FilterMode.Bilinear;
-                    previewTex.wrapMode = TextureWrapMode.Clamp;
-                    Color[] pixels = new Color[30 * 30];
-                    for (int i = 0; i < pixels.Length; i++)
-                        pixels[i] = previewColor;
-                    previewTex.SetPixels(pixels);
-                    previewTex.Apply();
-                    GUILayout.Box(previewTex, GUILayout.Width(30), GUILayout.Height(30));
+                    UpdateColorPreviewTexture(previewColor);
+                    GUILayout.Box(_colorPreviewTexture, GUILayout.Width(30), GUILayout.Height(30));
                 }
                 GUILayout.Space(10);
             }
         }
 
-        /// <summary>
-        /// Draws parameters in a tree view (collapsible foldouts) for Advanced view.
-        /// </summary>
         private void DrawTreeViewParameters()
         {
             foreach (var comp in _fieldInputs)
             {
                 if (!_foldoutStates.ContainsKey(comp.Key))
-                    _foldoutStates[comp.Key] = true; // default expanded
+                    _foldoutStates[comp.Key] = true;
 
                 _foldoutStates[comp.Key] = GUILayout.Toggle(_foldoutStates[comp.Key], "<b>" + comp.Key + "</b>", _foldoutStyle);
                 if (_foldoutStates[comp.Key])
@@ -420,15 +361,8 @@ namespace SledTunerProject
                         if (comp.Value.ContainsKey("b")) float.TryParse(comp.Value["b"], out b);
                         if (comp.Value.ContainsKey("a")) float.TryParse(comp.Value["a"], out a);
                         Color previewColor = new Color(r, g, b, a);
-                        Texture2D previewTex = new Texture2D(30, 30, TextureFormat.RGBA32, false);
-                        previewTex.filterMode = FilterMode.Bilinear;
-                        previewTex.wrapMode = TextureWrapMode.Clamp;
-                        Color[] pixels = new Color[30 * 30];
-                        for (int i = 0; i < pixels.Length; i++)
-                            pixels[i] = previewColor;
-                        previewTex.SetPixels(pixels);
-                        previewTex.Apply();
-                        GUILayout.Box(previewTex, GUILayout.Width(30), GUILayout.Height(30));
+                        UpdateColorPreviewTexture(previewColor);
+                        GUILayout.Box(_colorPreviewTexture, GUILayout.Width(30), GUILayout.Height(30));
                     }
                     GUILayout.EndVertical();
                 }
@@ -436,10 +370,6 @@ namespace SledTunerProject
             }
         }
 
-        /// <summary>
-        /// Helper method to draw parameter controls for one component.
-        /// Used by both flat and tree view Advanced layouts.
-        /// </summary>
         private void DrawSimpleParametersForComponent(string compName, Dictionary<string, string> fields)
         {
             foreach (var field in fields)
@@ -502,9 +432,6 @@ namespace SledTunerProject
             }
         }
 
-        /// <summary>
-        /// Draws the footer with extra toggle buttons (Ragdoll, Tree Renderer) and a Teleport button.
-        /// </summary>
         private void DrawFooter()
         {
             GUILayout.BeginHorizontal();
@@ -517,9 +444,6 @@ namespace SledTunerProject
             GUILayout.EndHorizontal();
         }
 
-        /// <summary>
-        /// Draws an opacity slider to adjust the menu's transparency.
-        /// </summary>
         private void DrawOpacitySlider()
         {
             GUILayout.BeginHorizontal();
@@ -530,9 +454,6 @@ namespace SledTunerProject
             GUILayout.EndHorizontal();
         }
 
-        /// <summary>
-        /// Applies all current GUI values to the SledParameterManager.
-        /// </summary>
         private void ApplyChanges()
         {
             foreach (var compEntry in _fieldInputs)
@@ -551,11 +472,6 @@ namespace SledTunerProject
             MelonLogger.Msg("[GUIManager] Changes applied.");
         }
 
-        // === UTILITY METHODS ===
-
-        /// <summary>
-        /// Converts a string input to the specified target type.
-        /// </summary>
         private object ConvertInput(string input, Type targetType)
         {
             if (targetType == typeof(float))
@@ -579,10 +495,6 @@ namespace SledTunerProject
             return input;
         }
 
-        /// <summary>
-        /// Draws a slider, text field, and plus/minus buttons for a numeric value.
-        /// (Used in Simple view.)
-        /// </summary>
         private float FloatFieldWithSlider(float currentVal, float min, float max, float step)
         {
             float newVal = GUILayout.HorizontalSlider(currentVal, min, max, GUILayout.Width(150));
@@ -598,10 +510,6 @@ namespace SledTunerProject
             return newVal;
         }
 
-        /// <summary>
-        /// Draws a labeled slider with plus/minus buttons for a numeric value.
-        /// (Used for headlight color channels in Simple view.)
-        /// </summary>
         private float FloatFieldWithSliderWithButtons(string label, float currentVal, float min, float max, float step)
         {
             GUILayout.BeginHorizontal();
@@ -618,9 +526,6 @@ namespace SledTunerProject
             return newVal;
         }
 
-        /// <summary>
-        /// Resets the Simple view parameters to their original defaults.
-        /// </summary>
         private void ResetValues()
         {
             speed = 10f;
@@ -637,9 +542,6 @@ namespace SledTunerProject
             test = false;
         }
 
-        /// <summary>
-        /// Handles freeform window resizing via mouse events.
-        /// </summary>
         private void HandleResize()
         {
             Vector2 mousePos = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
@@ -697,13 +599,10 @@ namespace SledTunerProject
             }
         }
 
-        // === WINDOW CONTROL METHODS ===
-
         private void MinimizeWindow()
         {
             if (!_isMinimized)
             {
-                // Collapse to a toolbar in the top-right corner with 10px margins.
                 _prevWindowRect = _windowRect;
                 _windowRect = new Rect(Screen.width - 150f - 10f, 10f, 150f, 30f);
                 _isMinimized = true;
@@ -735,9 +634,6 @@ namespace SledTunerProject
             MelonLogger.Msg("[GUIManager] Window closed.");
         }
 
-        /// <summary>
-        /// Draws a help panel with usage instructions.
-        /// </summary>
         private void DrawHelpPanel()
         {
             GUILayout.BeginVertical(GUI.skin.box);
@@ -751,6 +647,22 @@ namespace SledTunerProject
                 "  - In Advanced view, use the 'Tree View' toggle to collapse or expand components.\n" +
                 "  - 'Switch View' toggles between Advanced and Simple tuner menus.\n", _labelStyle);
             GUILayout.EndVertical();
+        }
+
+        private void UpdateColorPreviewTexture(Color color)
+        {
+            if (_colorPreviewTexture == null)
+            {
+                _colorPreviewTexture = new Texture2D(30, 30, TextureFormat.RGBA32, false);
+                _colorPreviewTexture.filterMode = FilterMode.Bilinear;
+                _colorPreviewTexture.wrapMode = TextureWrapMode.Clamp;
+            }
+
+            Color[] pixels = new Color[30 * 30];
+            for (int i = 0; i < pixels.Length; i++)
+                pixels[i] = color;
+            _colorPreviewTexture.SetPixels(pixels);
+            _colorPreviewTexture.Apply();
         }
     }
 }

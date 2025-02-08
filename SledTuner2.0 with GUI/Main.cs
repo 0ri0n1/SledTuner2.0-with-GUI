@@ -46,11 +46,9 @@ namespace SledTunerProject
 
             MelonLogger.Msg("[SledTuner] Mod setup complete. Will initialize sled after loading a valid scene or on F2/F3 press.");
 
-            // Subscribe to scene loaded events using the correct delegate signature.
             SceneManager.sceneLoaded += OnSceneWasLoaded;
         }
 
-        // Correct event handler signature: (Scene, LoadSceneMode)
         private void OnSceneWasLoaded(Scene scene, LoadSceneMode mode)
         {
             MelonLogger.Msg($"[SledTuner] OnSceneWasLoaded: {scene.name}");
@@ -97,7 +95,6 @@ namespace SledTunerProject
 
         public override void OnUpdate()
         {
-            // F2 toggles the menu and attempts initialization if in a valid scene.
             if (Input.GetKeyDown(KeyCode.F2))
             {
                 MelonLogger.Msg("[SledTuner] F2 pressed => Toggling menu.");
@@ -115,18 +112,16 @@ namespace SledTunerProject
                 }
             }
 
-            // F3 forces re-initialization.
             if (Input.GetKeyDown(KeyCode.F3))
             {
                 MelonLogger.Msg("[SledTuner] F3 pressed => Forcing re-initialization.");
-                _initialized = false; // Reset initialization flag.
+                _initialized = false;
                 TryInitializeSled();
             }
         }
 
         public override void OnGUI()
         {
-            // Draw the mod's GUI.
             _guiManager?.DrawMenu();
         }
     }

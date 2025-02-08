@@ -7,24 +7,8 @@ using UnityEngine;
 
 namespace SledTunerProject
 {
-    // (Ensure that elsewhere in your project you have definitions like:)
-    // public enum ControlType { Slider, Toggle }
-    // public class ParameterMetadata
-    // {
-    //     public string DisplayName;
-    //     public string Description;
-    //     public float MinValue;
-    //     public float MaxValue;
-    //     public ControlType Control;
-    //     public ParameterMetadata(string displayName, string description, float min, float max, ControlType control = ControlType.Slider)
-    //     {
-    //         DisplayName = displayName;
-    //         Description = description;
-    //         MinValue = min;
-    //         MaxValue = max;
-    //         Control = control;
-    //     }
-    // }
+    // public enum ControlType { Slider, Toggle, ... }
+    // public class ParameterMetadata { ... }
 
     public class SledParameterManager
     {
@@ -43,7 +27,8 @@ namespace SledTunerProject
         private Dictionary<string, Dictionary<string, object>> _currentValues;
 
         // Reflection cache and metadata
-        private readonly Dictionary<string, Dictionary<string, MemberWrapper>> _reflectionCache = new Dictionary<string, Dictionary<string, MemberWrapper>>();
+        private readonly Dictionary<string, Dictionary<string, MemberWrapper>> _reflectionCache
+            = new Dictionary<string, Dictionary<string, MemberWrapper>>();
         private Dictionary<string, Dictionary<string, ParameterMetadata>> _parameterMetadata;
 
         // Helper structure for caching fields/properties
@@ -97,7 +82,7 @@ namespace SledTunerProject
                 },
                 ["RagDollCollisionController"] = new string[]
                 {
-                    "ragdollTreshold", "ragdollTresholdDownFactor"
+                    "ragdollThreshold", "ragdollThresholdDownFactor"
                 },
                 ["Rigidbody"] = new string[]
                 {
@@ -128,7 +113,6 @@ namespace SledTunerProject
         {
             _parameterMetadata = new Dictionary<string, Dictionary<string, ParameterMetadata>>();
 
-            // Example metadata for SnowmobileController
             _parameterMetadata["SnowmobileController"] = new Dictionary<string, ParameterMetadata>
             {
                 ["leanSteerFactorSoft"] = new ParameterMetadata("Steering Sensitivity (Soft)", "Sensitivity on soft terrain", 0f, 5f),
@@ -153,7 +137,6 @@ namespace SledTunerProject
                 ["isWheeling"] = new ParameterMetadata("Is Wheeling", "Indicates if the sled is performing a wheelie", 0f, 1f, ControlType.Toggle)
             };
 
-            // Metadata for SnowmobileControllerBase
             _parameterMetadata["SnowmobileControllerBase"] = new Dictionary<string, ParameterMetadata>
             {
                 ["skisMaxAngle"] = new ParameterMetadata("Skis Max Angle", "Maximum angle of the skis", 0f, 90f),
@@ -170,7 +153,6 @@ namespace SledTunerProject
                 ["switchBackLeanDistance"] = new ParameterMetadata("Switchback Lean Distance", "Distance for lean during switchback", 0f, 5f)
             };
 
-            // Metadata for MeshInterpretter
             _parameterMetadata["MeshInterpretter"] = new Dictionary<string, ParameterMetadata>
             {
                 ["power"] = new ParameterMetadata("Power", "Engine power", 0f, 1000000f),
@@ -191,7 +173,6 @@ namespace SledTunerProject
                 ["drivetrainMaxSpeed2"] = new ParameterMetadata("Drivetrain Max Speed 2", "Maximum speed for drivetrain configuration 2", 0f, 500f)
             };
 
-            // Metadata for SnowParameters
             _parameterMetadata["SnowParameters"] = new Dictionary<string, ParameterMetadata>
             {
                 ["snowNormalConstantFactor"] = new ParameterMetadata("Snow Normal Constant Factor", "Constant factor for snow normals", 0f, 10f),
@@ -200,7 +181,6 @@ namespace SledTunerProject
                 ["snowNormalSpeedFactor"] = new ParameterMetadata("Snow Normal Speed Factor", "Speed factor for snow normals", 0f, 10f)
             };
 
-            // Metadata for SuspensionController
             _parameterMetadata["SuspensionController"] = new Dictionary<string, ParameterMetadata>
             {
                 ["suspensionSubSteps"] = new ParameterMetadata("Suspension Sub-Steps", "Number of sub-steps for suspension simulation", 1f, 500f),
@@ -211,7 +191,6 @@ namespace SledTunerProject
                 ["reduceSuspensionForceByTilt"] = new ParameterMetadata("Reduce Suspension Force By Tilt", "Reduce suspension force based on tilt", 0f, 1f, ControlType.Toggle)
             };
 
-            // Metadata for Stabilizer
             _parameterMetadata["Stabilizer"] = new Dictionary<string, ParameterMetadata>
             {
                 ["trackSpeedGyroMultiplier"] = new ParameterMetadata("Track Speed Gyro Multiplier", "Multiplier for gyro effect", 0f, 100f),
@@ -219,14 +198,12 @@ namespace SledTunerProject
                 ["trackSpeedDamping"] = new ParameterMetadata("Track Speed Damping", "Damping for track speed", 0f, 100f)
             };
 
-            // Metadata for RagDollCollisionController
             _parameterMetadata["RagDollCollisionController"] = new Dictionary<string, ParameterMetadata>
             {
-                ["ragdollTreshold"] = new ParameterMetadata("Ragdoll Threshold", "Threshold for ragdoll activation", 0f, 1000f),
-                ["ragdollTresholdDownFactor"] = new ParameterMetadata("Ragdoll Threshold Down Factor", "Down factor for ragdoll threshold", 0f, 10f)
+                ["ragdollThreshold"] = new ParameterMetadata("Ragdoll Threshold", "Threshold for ragdoll activation", 0f, 1000f),
+                ["ragdollThresholdDownFactor"] = new ParameterMetadata("Ragdoll Threshold Down Factor", "Down factor for ragdoll threshold", 0f, 10f)
             };
 
-            // Metadata for Rigidbody
             _parameterMetadata["Rigidbody"] = new Dictionary<string, ParameterMetadata>
             {
                 ["mass"] = new ParameterMetadata("Mass", "Mass of the sled", 0f, 1000f),
@@ -239,7 +216,6 @@ namespace SledTunerProject
                 ["collisionDetectionMode"] = new ParameterMetadata("Collision Detection Mode", "Collision detection mode", 0f, 3f)
             };
 
-            // Metadata for Light
             _parameterMetadata["Light"] = new Dictionary<string, ParameterMetadata>
             {
                 ["r"] = new ParameterMetadata("Light Red", "Red channel of Light color", 0f, 1f),
@@ -248,7 +224,6 @@ namespace SledTunerProject
                 ["a"] = new ParameterMetadata("Light Alpha", "Alpha channel of Light color", 0f, 1f)
             };
 
-            // Metadata for Shock
             _parameterMetadata["Shock"] = new Dictionary<string, ParameterMetadata>
             {
                 ["springFactor"] = new ParameterMetadata("Spring Factor", "Spring factor for shock", 0f, 20000f),
@@ -264,10 +239,6 @@ namespace SledTunerProject
 
         // === PUBLIC API METHODS ===
 
-        /// <summary>
-        /// Initializes sled components by finding "Snowmobile(Clone)" and its "Body",
-        /// building the reflection cache, and capturing original parameter values.
-        /// </summary>
         public void InitializeComponents()
         {
             IsInitialized = false;
@@ -287,7 +258,6 @@ namespace SledTunerProject
             _snowmobileBody = bodyTransform.gameObject;
             _rigidbody = _snowmobileBody.GetComponent<Rigidbody>();
 
-            // Get Light component from "Spot Light" child.
             Transform spotLightTransform = _snowmobileBody.transform.Find("Spot Light");
             if (spotLightTransform != null)
                 _light = spotLightTransform.GetComponent<Light>();
@@ -307,9 +277,6 @@ namespace SledTunerProject
             }
         }
 
-        /// <summary>
-        /// Applies the current parameter values to game components via reflection.
-        /// </summary>
         public void ApplyParameters()
         {
             foreach (var compKvp in _currentValues)
@@ -323,9 +290,6 @@ namespace SledTunerProject
             MelonLogger.Msg("[SledTuner] Applied parameters.");
         }
 
-        /// <summary>
-        /// Reverts all parameters to the original captured values.
-        /// </summary>
         public void RevertParameters()
         {
             if (_originalValues == null)
@@ -341,34 +305,22 @@ namespace SledTunerProject
             MelonLogger.Msg("[SledTuner] Reverted parameters to original values.");
         }
 
-        /// <summary>
-        /// Returns the current parameter values.
-        /// </summary>
         public Dictionary<string, Dictionary<string, object>> GetCurrentParameters()
         {
             return _currentValues;
         }
 
-        /// <summary>
-        /// Overwrites current parameters with provided data and applies them.
-        /// </summary>
         public void SetParameters(Dictionary<string, Dictionary<string, object>> data)
         {
             _currentValues = data;
             ApplyParameters();
         }
 
-        /// <summary>
-        /// Resets parameters to their original values.
-        /// </summary>
         public void ResetParameters()
         {
             RevertParameters();
         }
 
-        /// <summary>
-        /// Returns the sled name from the SnowmobileController's property.
-        /// </summary>
         public string GetSledName()
         {
             if (_snowmobileBody == null)
@@ -381,7 +333,10 @@ namespace SledTunerProject
                 return null;
             }
 
-            PropertyInfo prop = controller.GetType().GetProperty("GKMNAIKNNMJ", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            PropertyInfo prop = controller.GetType().GetProperty(
+                "GKMNAIKNNMJ",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+            );
             if (prop == null || !prop.CanRead)
             {
                 MelonLogger.Warning("[SledTuner] Property GKMNAIKNNMJ not found or unreadable.");
@@ -406,9 +361,6 @@ namespace SledTunerProject
             }
         }
 
-        /// <summary>
-        /// Returns the current value for a given component and field.
-        /// </summary>
         public object GetFieldValue(string componentName, string fieldName)
         {
             if (_currentValues.TryGetValue(componentName, out var dict) &&
@@ -419,9 +371,6 @@ namespace SledTunerProject
             return null;
         }
 
-        /// <summary>
-        /// Returns the type of a field from the reflection cache.
-        /// </summary>
         public Type GetFieldType(string componentName, string fieldName)
         {
             if (_reflectionCache.TryGetValue(componentName, out var members) &&
@@ -432,9 +381,6 @@ namespace SledTunerProject
             return null;
         }
 
-        /// <summary>
-        /// Returns the minimum slider value for a field from the metadata.
-        /// </summary>
         public float GetSliderMin(string componentName, string fieldName)
         {
             if (_parameterMetadata.TryGetValue(componentName, out var metaDict) &&
@@ -445,9 +391,6 @@ namespace SledTunerProject
             return -100f;
         }
 
-        /// <summary>
-        /// Returns the maximum slider value for a field from the metadata.
-        /// </summary>
         public float GetSliderMax(string componentName, string fieldName)
         {
             if (_parameterMetadata.TryGetValue(componentName, out var metaDict) &&
@@ -458,9 +401,6 @@ namespace SledTunerProject
             return 100f;
         }
 
-        /// <summary>
-        /// Sets the current value for a given component's field.
-        /// </summary>
         public void SetFieldValue(string componentName, string fieldName, object value)
         {
             if (!_currentValues.ContainsKey(componentName))
@@ -470,9 +410,6 @@ namespace SledTunerProject
 
         // === PRIVATE HELPER METHODS ===
 
-        /// <summary>
-        /// Builds the reflection cache for components.
-        /// </summary>
         private void BuildReflectionCache()
         {
             _reflectionCache.Clear();
@@ -489,23 +426,34 @@ namespace SledTunerProject
                     foreach (string field in fields)
                     {
                         MemberWrapper wrapper = new MemberWrapper();
-                        FieldInfo fi = type.GetField(field, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (fi != null)
+
+                        if (compName == "Light" &&
+                            (field == "r" || field == "g" || field == "b" || field == "a"))
                         {
-                            wrapper.Field = fi;
+                            // We'll handle color channels manually
                         }
                         else
                         {
-                            PropertyInfo pi = type.GetProperty(field, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                            if (pi != null)
-                                wrapper.Property = pi;
+                            FieldInfo fi = type.GetField(field,
+                                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                            if (fi != null)
+                            {
+                                wrapper.Field = fi;
+                            }
+                            else
+                            {
+                                PropertyInfo pi = type.GetProperty(field,
+                                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                if (pi != null)
+                                    wrapper.Property = pi;
+                            }
                         }
+
                         memberDict[field] = wrapper;
                     }
                 }
                 else
                 {
-                    // If component not found, add empty wrappers.
                     foreach (string field in fields)
                     {
                         memberDict[field] = new MemberWrapper();
@@ -515,23 +463,24 @@ namespace SledTunerProject
             }
         }
 
-        /// <summary>
-        /// Uses the reflection cache to inspect current values of sled components.
-        /// </summary>
         private Dictionary<string, Dictionary<string, object>> InspectSledComponents()
         {
-            Dictionary<string, Dictionary<string, object>> result = new Dictionary<string, Dictionary<string, object>>();
+            var result = new Dictionary<string, Dictionary<string, object>>();
+
             foreach (var kvp in ComponentsToInspect)
             {
                 string compName = kvp.Key;
                 string[] fields = kvp.Value;
                 Component comp = GetComponentByName(compName);
+
                 if (comp == null)
                 {
                     MelonLogger.Warning($"[SledTuner] Component '{compName}' not found during inspection; skipping.");
                     continue;
                 }
+
                 Dictionary<string, object> compValues = new Dictionary<string, object>();
+
                 if (!_reflectionCache.ContainsKey(compName))
                 {
                     foreach (string field in fields)
@@ -541,28 +490,54 @@ namespace SledTunerProject
                     result[compName] = compValues;
                     continue;
                 }
+
                 foreach (string field in fields)
                 {
                     compValues[field] = TryReadMember(comp, compName, field);
                 }
+
                 result[compName] = compValues;
             }
+
             MelonLogger.Msg("[SledTuner] Component inspection complete.");
             return result;
         }
 
-        /// <summary>
-        /// Attempts to read a member (field or property) from a component using the reflection cache.
-        /// </summary>
         private object TryReadMember(Component comp, string compName, string fieldName)
         {
+            if (compName == "Light" &&
+                (fieldName == "r" || fieldName == "g" || fieldName == "b" || fieldName == "a"))
+            {
+                var lightComp = (Light)comp;
+                Color c = lightComp.color;
+
+                switch (fieldName)
+                {
+                    case "r":
+                        return c.r;
+                    case "g":
+                        return c.g;
+                    case "b":
+                        return c.b;
+                    case "a":
+                        return c.a;
+                    default:
+                        return "(Not found: " + fieldName + ")";
+                }
+            }
+
             if (!_reflectionCache[compName].TryGetValue(fieldName, out MemberWrapper wrapper) || !wrapper.IsValid)
                 return $"(Not found: {fieldName})";
+
             if (!wrapper.CanRead)
                 return "(Not readable)";
+
             try
             {
-                object raw = (wrapper.Field != null) ? wrapper.Field.GetValue(comp) : wrapper.Property.GetValue(comp, null);
+                object raw = (wrapper.Field != null)
+                    ? wrapper.Field.GetValue(comp)
+                    : wrapper.Property.GetValue(comp, null);
+
                 return ConvertOrSkip(raw, wrapper.MemberType);
             }
             catch (Exception ex)
@@ -571,27 +546,33 @@ namespace SledTunerProject
             }
         }
 
-        /// <summary>
-        /// Converts a value to a simpler representation if it is a complex type.
-        /// </summary>
         private object ConvertOrSkip(object raw, Type fieldType)
         {
             if (raw == null)
                 return null;
+
             if (fieldType != null && typeof(UnityEngine.Object).IsAssignableFrom(fieldType))
                 return "(Skipped UnityEngine.Object)";
-            if (fieldType != null && !fieldType.IsPrimitive && fieldType != typeof(string) && fieldType != typeof(decimal))
+
+            if (fieldType != null && fieldType.IsEnum)
+                return raw;
+
+            if (fieldType != null && !fieldType.IsPrimitive
+                && fieldType != typeof(string)
+                && fieldType != typeof(decimal)
+                && !fieldType.IsEnum)
+            {
                 return "(Skipped complex type)";
+            }
+
             return raw;
         }
 
-        /// <summary>
-        /// Returns a component from the sled body by name.
-        /// </summary>
         private Component GetComponentByName(string compName)
         {
             if (_snowmobileBody == null)
                 return null;
+
             if (compName == "Rigidbody")
                 return _snowmobileBody.GetComponent<Rigidbody>();
             else if (compName == "Light")
@@ -602,25 +583,66 @@ namespace SledTunerProject
                 return null;
             }
             else
+            {
                 return _snowmobileBody.GetComponent(compName);
+            }
         }
 
-        // === NEW: ApplyField Method ===
-        /// <summary>
-        /// Applies a single field value to the corresponding component using reflection.
-        /// </summary>
         private void ApplyField(string compName, string fieldName, object value)
         {
             Component comp = GetComponentByName(compName);
             if (comp == null)
                 return;
-            if (!_reflectionCache.TryGetValue(compName, out var memberDict) || !memberDict.TryGetValue(fieldName, out var wrapper) || !wrapper.IsValid)
+
+            if (compName == "Light" &&
+                (fieldName == "r" || fieldName == "g" || fieldName == "b" || fieldName == "a"))
+            {
+                var lightComp = (Light)comp;
+                Color c = lightComp.color;
+
+                float floatVal = 0f;
+                if (value is double dVal) floatVal = (float)dVal;
+                else if (value is float fVal) floatVal = fVal;
+                else if (value is int iVal) floatVal = iVal;
+                else
+                {
+                    try { floatVal = Convert.ToSingle(value); }
+                    catch { }
+                }
+
+                switch (fieldName)
+                {
+                    case "r":
+                        c.r = Mathf.Clamp01(floatVal);
+                        break;
+                    case "g":
+                        c.g = Mathf.Clamp01(floatVal);
+                        break;
+                    case "b":
+                        c.b = Mathf.Clamp01(floatVal);
+                        break;
+                    case "a":
+                        c.a = Mathf.Clamp01(floatVal);
+                        break;
+                }
+
+                lightComp.color = c;
                 return;
+            }
+
+            if (!_reflectionCache.TryGetValue(compName, out var memberDict)
+                || !memberDict.TryGetValue(fieldName, out var wrapper)
+                || !wrapper.IsValid)
+            {
+                return;
+            }
+
             if (!wrapper.CanWrite)
             {
                 MelonLogger.Warning($"[SledTuner] {fieldName} in {compName} is read-only.");
                 return;
             }
+
             try
             {
                 object converted = ConvertValue(value, wrapper.MemberType);
@@ -635,16 +657,12 @@ namespace SledTunerProject
             }
         }
 
-        /// <summary>
-        /// Converts a value to the target type.
-        /// </summary>
         private object ConvertValue(object raw, Type targetType)
         {
             if (raw == null || targetType == null)
                 return null;
             try
             {
-                // Handle special cases for float and int conversions.
                 if (targetType == typeof(float) && raw is double dVal)
                     return (float)dVal;
                 if (targetType == typeof(int) && raw is long lVal)
@@ -653,6 +671,7 @@ namespace SledTunerProject
                     return bVal;
                 if (targetType.IsInstanceOfType(raw))
                     return raw;
+
                 return Convert.ChangeType(raw, targetType);
             }
             catch
