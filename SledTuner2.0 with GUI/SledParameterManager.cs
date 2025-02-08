@@ -589,6 +589,28 @@ namespace SledTunerProject
                     return null;
                 return ikPlayer.GetComponent(compName);
             }
+            else if (compName == "Shock")
+            {
+                // Locate the Shock under the Front and/or Rear suspension
+                // We'll return whichever one we find first
+                Transform frontShock = _snowmobileBody.transform.Find("Front Suspension/Shock");
+                if (frontShock != null)
+                {
+                    Component shockComponent = frontShock.GetComponent(compName);
+                    if (shockComponent != null)
+                        return shockComponent;
+                }
+
+                Transform rearShock = _snowmobileBody.transform.Find("Rear Suspension/Shock");
+                if (rearShock != null)
+                {
+                    Component shockComponent = rearShock.GetComponent(compName);
+                    if (shockComponent != null)
+                        return shockComponent;
+                }
+
+                return null;
+            }
             else
             {
                 return _snowmobileBody.GetComponent(compName);
