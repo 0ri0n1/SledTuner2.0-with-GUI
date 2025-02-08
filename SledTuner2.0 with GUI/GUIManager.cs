@@ -30,10 +30,10 @@ namespace SledTunerProject
         private GUIStyle _headerStyle;
 
         // === ADDITIONAL FEATURES STATE ===
-        private bool _manualApply = true;         // If true, changes take effect only after pressing "Apply".
-        private bool _showHelp = false;           // Toggle for help panel.
-        private bool _advancedView = true;        // _advancedView = true means using the full tuner menu; false = simple tuner menu.
-        private bool _treeViewEnabled = true;     // Within Advanced view, _treeViewEnabled toggles collapsible (tree) layout.
+        private bool _manualApply = true;        // If true, changes take effect only after pressing "Apply".
+        private bool _showHelp = false;          // Toggle for help panel.
+        private bool _advancedView = true;       // _advancedView = true -> full tuner menu; false -> simple tuner menu.
+        private bool _treeViewEnabled = true;    // If true in Advanced view, parameters are collapsible.
 
         // === WINDOW CONTROLS & RESIZING ===
         private bool _isMinimized = false;
@@ -42,24 +42,22 @@ namespace SledTunerProject
         private Vector2 _resizeStartMousePos;
         private Rect _resizeStartWindowRect;
         private ResizeEdges _resizeEdges;
-        private float _opacity = 1f;              // 0 (transparent) to 1 (opaque)
+        private float _opacity = 1f;             // 0 = transparent, 1 = opaque
 
         private struct ResizeEdges
         {
             public bool left, right, top, bottom;
         }
 
-        // === SIMPLE VIEW LOCAL PARAMETERS (for the simple tuner menu) ===
+        // === SIMPLE VIEW LOCAL PARAMETERS ===
+        // (We keep these for simple view sliders, except color now unified via reflection.)
         private float speed = 10f;
         private float gravity = -9.81f;
         private float power = 143000f;
         private float lugHeight = 0.18f;
         private float trackLength = 1f;
         private float pitchFactor = 7f;
-        private float lightR = 1f;
-        private float lightG = 1f;
-        private float lightB = 1f;
-        private float lightA = 1f;
+
         private bool notdriverInvincible = true;
         private bool test = false;
         private bool apply = false;
@@ -89,8 +87,7 @@ namespace SledTunerProject
         // === PUBLIC METHODS ===
 
         /// <summary>
-        /// Toggle the GUI menu on or off.
-        /// When opening, refresh field values.
+        /// Toggles the GUI menu on/off. When opening, refresh field values.
         /// </summary>
         public void ToggleMenu()
         {
@@ -107,8 +104,7 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Refresh the field inputs dictionary from SledParameterManager.
-        /// (Used by both Advanced and Simple views.)
+        /// Refresh the field inputs from SledParameterManager for both Simple & Advanced views.
         /// </summary>
         public void RePopulateFields()
         {
@@ -118,12 +114,15 @@ namespace SledTunerProject
             {
                 string compName = compEntry.Key;
                 _fieldInputs[compName] = new Dictionary<string, string>();
+
                 foreach (string field in compEntry.Value)
                 {
                     object val = _sledParameterManager.GetFieldValue(compName, field);
                     _fieldInputs[compName][field] = (val != null) ? val.ToString() : "(No data)";
                 }
             }
+
+            // Ensure foldout states exist for each component
             foreach (var comp in _fieldInputs.Keys)
             {
                 if (!_foldoutStates.ContainsKey(comp))
@@ -133,13 +132,14 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Draw the GUI window; call this from Main.OnGUI().
+        /// Draw the GUI. Called from Main.OnGUI().
         /// </summary>
         public void DrawMenu()
         {
             if (!_menuOpen)
                 return;
 
+            // Lazy init GUI styles
             if (_windowStyle == null)
             {
                 _windowStyle = new GUIStyle(GUI.skin.window);
@@ -151,16 +151,18 @@ namespace SledTunerProject
                 _headerStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 14 };
             }
 
+            // Apply window opacity
             Color prevColor = GUI.color;
             GUI.color = new Color(prevColor.r, prevColor.g, prevColor.b, _opacity);
 
+            // Draw the window
             _windowRect = GUILayout.Window(1234, _windowRect, WindowFunction, "SledTuner Menu", _windowStyle);
 
             GUI.color = prevColor;
             HandleResize();
         }
 
-        // === PRIVATE GUI DRAWING METHODS ===
+        // === PRIVATE DRAW METHODS ===
 
         private void WindowFunction(int windowID)
         {
@@ -212,6 +214,315 @@ namespace SledTunerProject
             }
         }
 
+        private void DrawAdvancedTunerMenu()
+        {
+            DrawConfigButtons();
+            GUILayout.Space(5);
+
+            GUILayout.BeginHorizontal();
+            _manualApply = GUILayout.Toggle(_manualApply, "Manual Apply", _toggleStyle, GUILayout.Width(120));
+            _treeViewEnabled = GUILayout.Toggle(_treeViewEnabled, "Tree View", _toggleStyle, GUILayout.Width(100));
+            GUILayout.EndHorizontal();
+            GUILayout.Space(5);
+
+            _scrollPos = GUILayout.BeginScrollView(_scrollPos, GUILayout.ExpandHeight(true));
+            if (_treeViewEnabled)
+                DrawTreeViewParameters();
+            else
+                DrawAdvancedFlatParameters();
+            GUILayout.EndScrollView();
+
+            GUILayout.Space(5);
+            DrawFooter();
+            GUILayout.Space(5);
+            DrawOpacitySlider();
+        }
+
+        private void DrawSimpleTunerMenu()
+        {
+            GUILayout.BeginVertical();
+            GUILayout.Label("Simple Tuner Menu", _headerStyle);
+            GUILayout.Space(5);
+
+            // Top row: "Apply" and "Reset"
+            GUILayout.BeginHorizontal();
+            apply = GUILayout.Toggle(apply, "Apply", _toggleStyle, GUILayout.Width(80));
+            if (GUILayout.Button("Reset", _buttonStyle, GUILayout.Width(80)))
+                ResetValues();
+            GUILayout.EndHorizontal();
+            GUILayout.Space(10);
+
+            // Local parameters (speed, gravity, etc.)
+            GUILayout.Label("FlySpeed");
+            speed = FloatFieldWithSlider(speed, 0f, 200f, 0.1f);
+
+            GUILayout.Label("Gravity");
+            gravity = FloatFieldWithSlider(gravity, -10f, 10f, 0.1f);
+
+            GUILayout.Label("Power");
+            power = FloatFieldWithSlider(power, 0f, 300000f, 1000f);
+
+            GUILayout.Label("Lug Height");
+            lugHeight = FloatFieldWithSlider(lugHeight, 0f, 2f, 0.01f);
+
+            GUILayout.Label("Track Length");
+            trackLength = FloatFieldWithSlider(trackLength, 0.5f, 2f, 0.01f);
+
+            GUILayout.Label("Pitch Factor");
+            pitchFactor = FloatFieldWithSlider(pitchFactor, 2f, 30f, 0.1f);
+
+            // === Now unify the color channels with reflection-based logic ===
+            GUILayout.Space(10);
+            GUILayout.Label("Headlight Color (RGBA)");
+
+            if (_fieldInputs.ContainsKey("Light"))
+            {
+                // We'll specifically draw the Light r/g/b/a fields using reflection approach
+                DrawColorFieldsFromReflection("Light", _fieldInputs["Light"]);
+            }
+            else
+            {
+                GUILayout.Label("(No Light component found)", _labelStyle);
+            }
+
+            // Show a color preview
+            float rVal = 1f, gVal = 1f, bVal = 1f, aVal = 1f;
+            if (_fieldInputs.ContainsKey("Light"))
+            {
+                string tempStr;
+                if (_fieldInputs["Light"].TryGetValue("r", out tempStr)) float.TryParse(tempStr, out rVal);
+                if (_fieldInputs["Light"].TryGetValue("g", out tempStr)) float.TryParse(tempStr, out gVal);
+                if (_fieldInputs["Light"].TryGetValue("b", out tempStr)) float.TryParse(tempStr, out bVal);
+                if (_fieldInputs["Light"].TryGetValue("a", out tempStr)) float.TryParse(tempStr, out aVal);
+            }
+            Color currentColor = new Color(rVal, gVal, bVal, aVal);
+
+            GUILayout.Label("Color Preview:");
+            UpdateColorPreviewTexture(currentColor);
+            GUILayout.Box(_colorPreviewTexture, GUILayout.Width(30), GUILayout.Height(30));
+
+            GUILayout.Space(10);
+            notdriverInvincible = GUILayout.Toggle(notdriverInvincible, "Driver Ragdoll", _toggleStyle, GUILayout.Width(150));
+            test = GUILayout.Toggle(test, "Test", _toggleStyle, GUILayout.Width(150));
+
+            GUILayout.Space(10);
+            GUILayout.Label("Made by Samisalami", _labelStyle, GUILayout.Width(200));
+            GUILayout.EndVertical();
+        }
+
+        /// <summary>
+        /// Draw only the Light r/g/b/a fields via reflection, with sliders and +/- buttons.
+        /// Called by Simple Tuner as well, so code is unified.
+        /// </summary>
+        private void DrawColorFieldsFromReflection(string compName, Dictionary<string, string> lightFields)
+        {
+            // We expect "r", "g", "b", "a" keys
+            string[] channels = { "r", "g", "b", "a" };
+            foreach (string channel in channels)
+            {
+                if (!lightFields.ContainsKey(channel))
+                {
+                    // If missing, skip
+                    continue;
+                }
+
+                // Parse current value
+                float currentVal;
+                float.TryParse(lightFields[channel], out currentVal);
+
+                // We'll do a slider from 0..1, step = 0.1
+                float sliderMin = 0f;
+                float sliderMax = 1f;
+                float step = 0.1f;
+
+                // Friendly label (classic switch for C# 7.3)
+                string channelLabel;
+                switch (channel)
+                {
+                    case "r":
+                        channelLabel = "Red";
+                        break;
+                    case "g":
+                        channelLabel = "Green";
+                        break;
+                    case "b":
+                        channelLabel = "Blue";
+                        break;
+                    case "a":
+                        channelLabel = "Alpha";
+                        break;
+                    default:
+                        channelLabel = channel;
+                        break;
+                }
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label(channelLabel + ":", _labelStyle, GUILayout.Width(40));
+
+                float newVal = GUILayout.HorizontalSlider(currentVal, sliderMin, sliderMax, GUILayout.Width(150));
+                string newText = GUILayout.TextField(newVal.ToString("F2"), _textFieldStyle, GUILayout.Width(40));
+                if (float.TryParse(newText, out float parsedVal))
+                    newVal = parsedVal;
+
+                if (GUILayout.Button("-", _buttonStyle, GUILayout.Width(25)))
+                    newVal = Mathf.Max(sliderMin, newVal - step);
+                if (GUILayout.Button("+", _buttonStyle, GUILayout.Width(25)))
+                    newVal = Mathf.Min(sliderMax, newVal + step);
+
+                // If it changed
+                if (Mathf.Abs(newVal - currentVal) > 0.0001f)
+                {
+                    lightFields[channel] = newVal.ToString("F2");
+                    _sledParameterManager.SetFieldValue(compName, channel, newVal);
+
+                    if (!_manualApply)
+                        _sledParameterManager.ApplyParameters();
+                }
+
+                GUILayout.EndHorizontal();
+            }
+        }
+
+        private void DrawAdvancedFlatParameters()
+        {
+            foreach (var comp in _fieldInputs)
+            {
+                GUILayout.Label("<b>Component: " + comp.Key + "</b>", _labelStyle);
+                DrawSimpleParametersForComponent(comp.Key, comp.Value);
+
+                // If Light, show a color preview block
+                if (comp.Key == "Light")
+                {
+                    GUILayout.Space(5);
+                    GUILayout.Label("Color Preview:", _labelStyle);
+                    float r = 1f, g = 1f, b = 1f, a = 1f;
+                    if (comp.Value.ContainsKey("r")) float.TryParse(comp.Value["r"], out r);
+                    if (comp.Value.ContainsKey("g")) float.TryParse(comp.Value["g"], out g);
+                    if (comp.Value.ContainsKey("b")) float.TryParse(comp.Value["b"], out b);
+                    if (comp.Value.ContainsKey("a")) float.TryParse(comp.Value["a"], out a);
+                    Color previewColor = new Color(r, g, b, a);
+                    UpdateColorPreviewTexture(previewColor);
+                    GUILayout.Box(_colorPreviewTexture, GUILayout.Width(30), GUILayout.Height(30));
+                }
+
+                GUILayout.Space(10);
+            }
+        }
+
+        private void DrawTreeViewParameters()
+        {
+            foreach (var comp in _fieldInputs)
+            {
+                if (!_foldoutStates.ContainsKey(comp.Key))
+                    _foldoutStates[comp.Key] = true;
+
+                _foldoutStates[comp.Key] = GUILayout.Toggle(_foldoutStates[comp.Key], "<b>" + comp.Key + "</b>", _foldoutStyle);
+                if (_foldoutStates[comp.Key])
+                {
+                    GUILayout.BeginVertical(GUI.skin.box);
+                    DrawSimpleParametersForComponent(comp.Key, comp.Value);
+
+                    // If Light, show color preview
+                    if (comp.Key == "Light")
+                    {
+                        GUILayout.Space(5);
+                        GUILayout.Label("Color Preview:", _labelStyle);
+                        float r = 1f, g = 1f, b = 1f, a = 1f;
+                        if (comp.Value.ContainsKey("r")) float.TryParse(comp.Value["r"], out r);
+                        if (comp.Value.ContainsKey("g")) float.TryParse(comp.Value["g"], out g);
+                        if (comp.Value.ContainsKey("b")) float.TryParse(comp.Value["b"], out b);
+                        if (comp.Value.ContainsKey("a")) float.TryParse(comp.Value["a"], out a);
+                        Color previewColor = new Color(r, g, b, a);
+                        UpdateColorPreviewTexture(previewColor);
+                        GUILayout.Box(_colorPreviewTexture, GUILayout.Width(30), GUILayout.Height(30));
+                    }
+
+                    GUILayout.EndVertical();
+                }
+                GUILayout.Space(10);
+            }
+        }
+
+        /// <summary>
+        /// This method is used by the Advanced view for reflection-based parameters.
+        /// The Simple view calls a separate approach for local fields except we unify Light color with reflection.
+        /// </summary>
+        private void DrawSimpleParametersForComponent(string compName, Dictionary<string, string> fields)
+        {
+            foreach (var field in fields)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label(field.Key + ":", _labelStyle, GUILayout.Width(150));
+                Type fieldType = _sledParameterManager.GetFieldType(compName, field.Key);
+
+                // Retrieve the string from _fieldInputs
+                string fieldStringVal = field.Value;
+
+                // === float/int/double handling
+                if (fieldType == typeof(float) || fieldType == typeof(int) || fieldType == typeof(double))
+                {
+                    double currentVal = 0.0;
+                    double.TryParse(fieldStringVal, out currentVal);
+
+                    float sliderMin = _sledParameterManager.GetSliderMin(compName, field.Key);
+                    float sliderMax = _sledParameterManager.GetSliderMax(compName, field.Key);
+                    double step = (fieldType == typeof(int)) ? 1.0 : 0.1;
+
+                    // Draw as float slider, store double behind the scenes
+                    float newValFloat = GUILayout.HorizontalSlider((float)currentVal, sliderMin, sliderMax, GUILayout.Width(150));
+                    string newText = GUILayout.TextField(newValFloat.ToString("F2"), _textFieldStyle, GUILayout.Width(50));
+                    if (float.TryParse(newText, out float parsedVal))
+                        newValFloat = parsedVal;
+
+                    GUILayout.BeginHorizontal(GUILayout.Width(60));
+                    if (GUILayout.Button("-", _buttonStyle, GUILayout.Width(25)))
+                        newValFloat = Mathf.Max(sliderMin, newValFloat - (float)step);
+                    if (GUILayout.Button("+", _buttonStyle, GUILayout.Width(25)))
+                        newValFloat = Mathf.Min(sliderMax, newValFloat + (float)step);
+                    GUILayout.EndHorizontal();
+
+                    double finalVal = (double)newValFloat;
+                    if (finalVal.ToString() != fieldStringVal)
+                    {
+                        _fieldInputs[compName][field.Key] = finalVal.ToString();
+                        _sledParameterManager.SetFieldValue(compName, field.Key, finalVal);
+                        if (!_manualApply)
+                            _sledParameterManager.ApplyParameters();
+                    }
+                }
+                else if (fieldType == typeof(bool))
+                {
+                    bool currentBool = false;
+                    bool.TryParse(fieldStringVal, out currentBool);
+                    bool newBool = GUILayout.Toggle(currentBool, currentBool ? "On" : "Off", _toggleStyle, GUILayout.Width(80));
+                    if (newBool != currentBool)
+                    {
+                        _fieldInputs[compName][field.Key] = newBool.ToString();
+                        _sledParameterManager.SetFieldValue(compName, field.Key, newBool);
+                        _sledParameterManager.ApplyParameters();
+                    }
+                }
+                else if (fieldType == typeof(Vector2) || fieldType == typeof(Vector3) || fieldType == typeof(Vector4))
+                {
+                    GUILayout.Label("(Vector type handled separately)", _labelStyle, GUILayout.ExpandWidth(true));
+                }
+                else
+                {
+                    // Fallback for strings, or unknown types
+                    string newValue = GUILayout.TextField(fieldStringVal, _textFieldStyle, GUILayout.ExpandWidth(true));
+                    if (newValue != fieldStringVal)
+                    {
+                        _fieldInputs[compName][field.Key] = newValue;
+                        object conv = ConvertInput(newValue, fieldType);
+                        _sledParameterManager.SetFieldValue(compName, field.Key, conv);
+                        if (!_manualApply)
+                            _sledParameterManager.ApplyParameters();
+                    }
+                }
+                GUILayout.EndHorizontal();
+            }
+        }
+
         private void DrawConfigButtons()
         {
             GUILayout.BeginHorizontal();
@@ -240,386 +551,6 @@ namespace SledTunerProject
             GUILayout.EndHorizontal();
         }
 
-        private void DrawAdvancedTunerMenu()
-        {
-            DrawConfigButtons();
-            GUILayout.Space(5);
-            GUILayout.BeginHorizontal();
-            _manualApply = GUILayout.Toggle(_manualApply, "Manual Apply", _toggleStyle, GUILayout.Width(120));
-            _treeViewEnabled = GUILayout.Toggle(_treeViewEnabled, "Tree View", _toggleStyle, GUILayout.Width(100));
-            GUILayout.EndHorizontal();
-            GUILayout.Space(5);
-
-            _scrollPos = GUILayout.BeginScrollView(_scrollPos, GUILayout.ExpandHeight(true));
-            if (_treeViewEnabled)
-                DrawTreeViewParameters();
-            else
-                DrawAdvancedFlatParameters();
-            GUILayout.EndScrollView();
-
-            GUILayout.Space(5);
-            DrawFooter();
-            GUILayout.Space(5);
-            DrawOpacitySlider();
-        }
-
-        private void DrawSimpleTunerMenu()
-        {
-            GUILayout.BeginVertical();
-            GUILayout.Label("Simple Tuner Menu", _headerStyle);
-            GUILayout.Space(5);
-
-            GUILayout.BeginHorizontal();
-            apply = GUILayout.Toggle(apply, "Apply", _toggleStyle, GUILayout.Width(80));
-            if (GUILayout.Button("Reset", _buttonStyle, GUILayout.Width(80)))
-                ResetValues();
-            GUILayout.EndHorizontal();
-            GUILayout.Space(10);
-
-            GUILayout.Label("FlySpeed");
-            speed = FloatFieldWithSlider(speed, 0f, 200f, 0.1f);
-
-            GUILayout.Label("Gravity");
-            gravity = FloatFieldWithSlider(gravity, -10f, 10f, 0.1f);
-
-            GUILayout.Label("Power");
-            power = FloatFieldWithSlider(power, 0f, 300000f, 1000f);
-
-            GUILayout.Label("Lug Height");
-            lugHeight = FloatFieldWithSlider(lugHeight, 0f, 2f, 0.01f);
-
-            GUILayout.Label("Track Length");
-            trackLength = FloatFieldWithSlider(trackLength, 0.5f, 2f, 0.01f);
-
-            GUILayout.Label("Pitch Factor");
-            pitchFactor = FloatFieldWithSlider(pitchFactor, 2f, 30f, 0.1f);
-
-            GUILayout.Space(10);
-            GUILayout.Label("Headlight Color (RGBA)");
-            lightR = FloatFieldWithSliderWithButtons("R", lightR, 0f, 1f, 0.1f);
-            lightG = FloatFieldWithSliderWithButtons("G", lightG, 0f, 1f, 0.1f);
-            lightB = FloatFieldWithSliderWithButtons("B", lightB, 0f, 1f, 0.1f);
-            lightA = FloatFieldWithSliderWithButtons("A", lightA, 0f, 1f, 0.1f);
-
-            GUILayout.Space(5);
-            GUILayout.Label("Color Preview:");
-            Color currentColor = new Color(lightR, lightG, lightB, lightA);
-            UpdateColorPreviewTexture(currentColor);
-            GUILayout.Box(_colorPreviewTexture, GUILayout.Width(30), GUILayout.Height(30));
-
-            GUILayout.Space(10);
-            notdriverInvincible = GUILayout.Toggle(notdriverInvincible, "Driver Ragdoll", _toggleStyle, GUILayout.Width(150));
-            test = GUILayout.Toggle(test, "Test", _toggleStyle, GUILayout.Width(150));
-
-            GUILayout.Space(10);
-            GUILayout.Label("Made by Samisalami", _labelStyle, GUILayout.Width(200));
-            GUILayout.EndVertical();
-        }
-
-        private void DrawAdvancedFlatParameters()
-        {
-            foreach (var comp in _fieldInputs)
-            {
-                GUILayout.Label("<b>Component: " + comp.Key + "</b>", _labelStyle);
-                DrawSimpleParametersForComponent(comp.Key, comp.Value);
-                if (comp.Key == "Light")
-                {
-                    GUILayout.Space(5);
-                    GUILayout.Label("Color Preview:", _labelStyle);
-                    float r = 1f, g = 1f, b = 1f, a = 1f;
-                    if (comp.Value.ContainsKey("r")) float.TryParse(comp.Value["r"], out r);
-                    if (comp.Value.ContainsKey("g")) float.TryParse(comp.Value["g"], out g);
-                    if (comp.Value.ContainsKey("b")) float.TryParse(comp.Value["b"], out b);
-                    if (comp.Value.ContainsKey("a")) float.TryParse(comp.Value["a"], out a);
-                    Color previewColor = new Color(r, g, b, a);
-                    UpdateColorPreviewTexture(previewColor);
-                    GUILayout.Box(_colorPreviewTexture, GUILayout.Width(30), GUILayout.Height(30));
-                }
-                GUILayout.Space(10);
-            }
-        }
-
-        private void DrawTreeViewParameters()
-        {
-            foreach (var comp in _fieldInputs)
-            {
-                if (!_foldoutStates.ContainsKey(comp.Key))
-                    _foldoutStates[comp.Key] = true;
-
-                _foldoutStates[comp.Key] = GUILayout.Toggle(_foldoutStates[comp.Key], "<b>" + comp.Key + "</b>", _foldoutStyle);
-                if (_foldoutStates[comp.Key])
-                {
-                    GUILayout.BeginVertical(GUI.skin.box);
-                    DrawSimpleParametersForComponent(comp.Key, comp.Value);
-                    if (comp.Key == "Light")
-                    {
-                        GUILayout.Space(5);
-                        GUILayout.Label("Color Preview:", _labelStyle);
-                        float r = 1f, g = 1f, b = 1f, a = 1f;
-                        if (comp.Value.ContainsKey("r")) float.TryParse(comp.Value["r"], out r);
-                        if (comp.Value.ContainsKey("g")) float.TryParse(comp.Value["g"], out g);
-                        if (comp.Value.ContainsKey("b")) float.TryParse(comp.Value["b"], out b);
-                        if (comp.Value.ContainsKey("a")) float.TryParse(comp.Value["a"], out a);
-                        Color previewColor = new Color(r, g, b, a);
-                        UpdateColorPreviewTexture(previewColor);
-                        GUILayout.Box(_colorPreviewTexture, GUILayout.Width(30), GUILayout.Height(30));
-                    }
-                    GUILayout.EndVertical();
-                }
-                GUILayout.Space(10);
-            }
-        }
-
-        /// <summary>
-        /// Draws a row of parameter controls for each field within the specified component.
-        /// Now includes handling for Vector2, Vector3, Vector4, and double types.
-        /// </summary>
-        private void DrawSimpleParametersForComponent(string compName, Dictionary<string, string> fields)
-        {
-            foreach (var field in fields)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label(field.Key + ":", _labelStyle, GUILayout.Width(150));
-                Type fieldType = _sledParameterManager.GetFieldType(compName, field.Key);
-
-                // Get the actual object from the field inputs (which may be string-based)
-                string fieldStringVal = field.Value;
-                object fieldObj = ConvertFieldObject(compName, field.Key, fieldStringVal);
-
-                // === NEW: Handle float/int/double together ===
-                if (fieldType == typeof(float) || fieldType == typeof(int) || fieldType == typeof(double))
-                {
-                    double currentVal = 0.0;
-                    double.TryParse(field.Value, out currentVal);
-
-                    float sliderMin = _sledParameterManager.GetSliderMin(compName, field.Key);
-                    float sliderMax = _sledParameterManager.GetSliderMax(compName, field.Key);
-                    double step = (fieldType == typeof(int)) ? 1.0 : 0.1;
-
-                    // Draw slider as float, but keep double behind the scenes
-                    float newValFloat = GUILayout.HorizontalSlider((float)currentVal, sliderMin, sliderMax, GUILayout.Width(150));
-                    string newText = GUILayout.TextField(newValFloat.ToString("F2"), _textFieldStyle, GUILayout.Width(50));
-                    if (float.TryParse(newText, out float parsedVal))
-                        newValFloat = parsedVal;
-
-                    GUILayout.BeginHorizontal(GUILayout.Width(60));
-                    if (GUILayout.Button("-", _buttonStyle, GUILayout.Width(25)))
-                        newValFloat = Mathf.Max(sliderMin, newValFloat - (float)step);
-                    if (GUILayout.Button("+", _buttonStyle, GUILayout.Width(25)))
-                        newValFloat = Mathf.Min(sliderMax, newValFloat + (float)step);
-                    GUILayout.EndHorizontal();
-
-                    double finalVal = (double)newValFloat;
-                    // If the string representation differs, update
-                    if (finalVal.ToString() != field.Value)
-                    {
-                        _fieldInputs[compName][field.Key] = finalVal.ToString();
-                        _sledParameterManager.SetFieldValue(compName, field.Key, finalVal);
-                        if (!_manualApply)
-                            _sledParameterManager.ApplyParameters();
-                    }
-                }
-                else if (fieldType == typeof(bool))
-                {
-                    bool currentBool = false;
-                    bool.TryParse(field.Value, out currentBool);
-                    bool newBool = GUILayout.Toggle(currentBool, currentBool ? "On" : "Off", _toggleStyle, GUILayout.Width(80));
-                    if (newBool != currentBool)
-                    {
-                        _fieldInputs[compName][field.Key] = newBool.ToString();
-                        _sledParameterManager.SetFieldValue(compName, field.Key, newBool);
-                        _sledParameterManager.ApplyParameters();
-                    }
-                }
-                else if (fieldType == typeof(Vector2))
-                {
-                    // Handle Vector2
-                    Vector2 vectorVal = (fieldObj is Vector2) ? (Vector2)fieldObj : Vector2.zero;
-                    Vector2 newVec = DrawVector2Field(vectorVal);
-                    if (newVec != vectorVal)
-                    {
-                        // Store as "x,y"
-                        string vectorString = $"{newVec.x},{newVec.y}";
-                        _fieldInputs[compName][field.Key] = vectorString;
-                        _sledParameterManager.SetFieldValue(compName, field.Key, newVec);
-                        if (!_manualApply)
-                            _sledParameterManager.ApplyParameters();
-                    }
-                }
-                else if (fieldType == typeof(Vector3))
-                {
-                    // Handle Vector3
-                    Vector3 vectorVal = (fieldObj is Vector3) ? (Vector3)fieldObj : Vector3.zero;
-                    Vector3 newVec = DrawVector3Field(vectorVal);
-                    if (newVec != vectorVal)
-                    {
-                        // Store as "x,y,z"
-                        string vectorString = $"{newVec.x},{newVec.y},{newVec.z}";
-                        _fieldInputs[compName][field.Key] = vectorString;
-                        _sledParameterManager.SetFieldValue(compName, field.Key, newVec);
-                        if (!_manualApply)
-                            _sledParameterManager.ApplyParameters();
-                    }
-                }
-                else if (fieldType == typeof(Vector4))
-                {
-                    // Handle Vector4
-                    Vector4 vectorVal = (fieldObj is Vector4) ? (Vector4)fieldObj : Vector4.zero;
-                    Vector4 newVec = DrawVector4Field(vectorVal);
-                    if (newVec != vectorVal)
-                    {
-                        // Store as "x,y,z,w"
-                        string vectorString = $"{newVec.x},{newVec.y},{newVec.z},{newVec.w}";
-                        _fieldInputs[compName][field.Key] = vectorString;
-                        _sledParameterManager.SetFieldValue(compName, field.Key, newVec);
-                        if (!_manualApply)
-                            _sledParameterManager.ApplyParameters();
-                    }
-                }
-                else
-                {
-                    // Fallback to default text field
-                    string newValue = GUILayout.TextField(field.Value, _textFieldStyle, GUILayout.ExpandWidth(true));
-                    if (newValue != field.Value)
-                    {
-                        _fieldInputs[compName][field.Key] = newValue;
-                        object conv = ConvertInput(newValue, fieldType);
-                        _sledParameterManager.SetFieldValue(compName, field.Key, conv);
-                        if (!_manualApply)
-                            _sledParameterManager.ApplyParameters();
-                    }
-                }
-                GUILayout.EndHorizontal();
-            }
-        }
-
-        /// <summary>
-        /// Draws a Vector2 field with sliders and +/- buttons for each axis.
-        /// </summary>
-        private Vector2 DrawVector2Field(Vector2 currentVal)
-        {
-            float x = DrawSingleFloatField("X", currentVal.x, -1000f, 1000f, 0.1f, 70f);
-            float y = DrawSingleFloatField("Y", currentVal.y, -1000f, 1000f, 0.1f, 70f);
-            return new Vector2(x, y);
-        }
-
-        /// <summary>
-        /// Draws a Vector3 field with sliders and +/- buttons for each axis.
-        /// </summary>
-        private Vector3 DrawVector3Field(Vector3 currentVal)
-        {
-            float x = DrawSingleFloatField("X", currentVal.x, -1000f, 1000f, 0.1f, 70f);
-            float y = DrawSingleFloatField("Y", currentVal.y, -1000f, 1000f, 0.1f, 70f);
-            float z = DrawSingleFloatField("Z", currentVal.z, -1000f, 1000f, 0.1f, 70f);
-            return new Vector3(x, y, z);
-        }
-
-        /// <summary>
-        /// Draws a Vector4 field with sliders and +/- buttons for each axis.
-        /// </summary>
-        private Vector4 DrawVector4Field(Vector4 currentVal)
-        {
-            float x = DrawSingleFloatField("X", currentVal.x, -1000f, 1000f, 0.1f, 70f);
-            float y = DrawSingleFloatField("Y", currentVal.y, -1000f, 1000f, 0.1f, 70f);
-            float z = DrawSingleFloatField("Z", currentVal.z, -1000f, 1000f, 0.1f, 70f);
-            float w = DrawSingleFloatField("W", currentVal.w, -1000f, 1000f, 0.1f, 70f);
-            return new Vector4(x, y, z, w);
-        }
-
-        /// <summary>
-        /// Helper to draw a label, slider, text field, and +/- buttons for a single float component.
-        /// axisLabelWidth controls the width of the axis label (e.g. "X:" or "Y:").
-        /// </summary>
-        private float DrawSingleFloatField(string axisLabel, float value, float min, float max, float step, float axisLabelWidth)
-        {
-            GUILayout.BeginHorizontal();
-            GUILayout.Label(axisLabel + ":", _labelStyle, GUILayout.Width(axisLabelWidth));
-            float sliderVal = GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(100));
-            string textVal = GUILayout.TextField(sliderVal.ToString("F2"), _textFieldStyle, GUILayout.Width(50));
-            if (float.TryParse(textVal, out float parsed))
-                sliderVal = parsed;
-            if (GUILayout.Button("-", _buttonStyle, GUILayout.Width(25)))
-                sliderVal = Mathf.Max(min, sliderVal - step);
-            if (GUILayout.Button("+", _buttonStyle, GUILayout.Width(25)))
-                sliderVal = Mathf.Min(max, sliderVal + step);
-            GUILayout.EndHorizontal();
-            return sliderVal;
-        }
-
-        /// <summary>
-        /// Converts the stored string in _fieldInputs to an actual object type (Vector2, Vector3, etc.) if needed.
-        /// </summary>
-        private object ConvertFieldObject(string compName, string fieldName, string fieldStringVal)
-        {
-            Type fieldType = _sledParameterManager.GetFieldType(compName, fieldName);
-            if (fieldType == typeof(Vector2))
-            {
-                if (TryParseVector2(fieldStringVal, out Vector2 v2))
-                    return v2;
-                return Vector2.zero;
-            }
-            else if (fieldType == typeof(Vector3))
-            {
-                if (TryParseVector3(fieldStringVal, out Vector3 v3))
-                    return v3;
-                return Vector3.zero;
-            }
-            else if (fieldType == typeof(Vector4))
-            {
-                if (TryParseVector4(fieldStringVal, out Vector4 v4))
-                    return v4;
-                return Vector4.zero;
-            }
-            return fieldStringVal;
-        }
-
-        private bool TryParseVector2(string input, out Vector2 vector)
-        {
-            vector = Vector2.zero;
-            if (string.IsNullOrEmpty(input)) return false;
-            string[] parts = input.Split(',');
-            if (parts.Length != 2) return false;
-            if (float.TryParse(parts[0], out float x) && float.TryParse(parts[1], out float y))
-            {
-                vector = new Vector2(x, y);
-                return true;
-            }
-            return false;
-        }
-
-        private bool TryParseVector3(string input, out Vector3 vector)
-        {
-            vector = Vector3.zero;
-            if (string.IsNullOrEmpty(input)) return false;
-            string[] parts = input.Split(',');
-            if (parts.Length != 3) return false;
-            if (float.TryParse(parts[0], out float x) &&
-                float.TryParse(parts[1], out float y) &&
-                float.TryParse(parts[2], out float z))
-            {
-                vector = new Vector3(x, y, z);
-                return true;
-            }
-            return false;
-        }
-
-        private bool TryParseVector4(string input, out Vector4 vector)
-        {
-            vector = Vector4.zero;
-            if (string.IsNullOrEmpty(input)) return false;
-            string[] parts = input.Split(',');
-            if (parts.Length != 4) return false;
-            if (float.TryParse(parts[0], out float x) &&
-                float.TryParse(parts[1], out float y) &&
-                float.TryParse(parts[2], out float z) &&
-                float.TryParse(parts[3], out float w))
-            {
-                vector = new Vector4(x, y, z, w);
-                return true;
-            }
-            return false;
-        }
-
         private void DrawFooter()
         {
             GUILayout.BeginHorizontal();
@@ -644,6 +575,7 @@ namespace SledTunerProject
 
         private void ApplyChanges()
         {
+            // Sync _fieldInputs -> Reflection
             foreach (var compEntry in _fieldInputs)
             {
                 string compName = compEntry.Key;
@@ -664,41 +596,48 @@ namespace SledTunerProject
         {
             if (targetType == typeof(float))
             {
-                if (float.TryParse(input, out float f))
+                float f;
+                if (float.TryParse(input, out f))
                     return f;
                 return 0f;
             }
             else if (targetType == typeof(int))
             {
-                if (int.TryParse(input, out int i))
+                int i;
+                if (int.TryParse(input, out i))
                     return i;
                 return 0;
             }
             else if (targetType == typeof(bool))
             {
-                if (bool.TryParse(input, out bool b))
+                bool b;
+                if (bool.TryParse(input, out b))
                     return b;
                 return false;
             }
             else if (targetType == typeof(double))
             {
-                if (double.TryParse(input, out double d))
+                double d;
+                if (double.TryParse(input, out d))
                     return d;
                 return 0.0;
             }
             else if (targetType == typeof(Vector2))
             {
-                if (TryParseVector2(input, out Vector2 v2)) return v2;
+                Vector2 v2;
+                if (TryParseVector2(input, out v2)) return v2;
                 return Vector2.zero;
             }
             else if (targetType == typeof(Vector3))
             {
-                if (TryParseVector3(input, out Vector3 v3)) return v3;
+                Vector3 v3;
+                if (TryParseVector3(input, out v3)) return v3;
                 return Vector3.zero;
             }
             else if (targetType == typeof(Vector4))
             {
-                if (TryParseVector4(input, out Vector4 v4)) return v4;
+                Vector4 v4;
+                if (TryParseVector4(input, out v4)) return v4;
                 return Vector4.zero;
             }
             return input;
@@ -708,7 +647,8 @@ namespace SledTunerProject
         {
             float newVal = GUILayout.HorizontalSlider(currentVal, min, max, GUILayout.Width(150));
             string textVal = GUILayout.TextField(newVal.ToString("F2"), GUILayout.Width(50));
-            if (float.TryParse(textVal, out float parsed))
+            float parsed;
+            if (float.TryParse(textVal, out parsed))
                 newVal = parsed;
             GUILayout.BeginHorizontal(GUILayout.Width(60));
             if (GUILayout.Button("-", _buttonStyle, GUILayout.Width(25)))
@@ -719,38 +659,76 @@ namespace SledTunerProject
             return newVal;
         }
 
-        private float FloatFieldWithSliderWithButtons(string label, float currentVal, float min, float max, float step)
-        {
-            GUILayout.BeginHorizontal();
-            GUILayout.Label(label + ":", GUILayout.Width(20));
-            float newVal = GUILayout.HorizontalSlider(currentVal, min, max, GUILayout.Width(150));
-            string textVal = GUILayout.TextField(newVal.ToString("F2"), _textFieldStyle, GUILayout.Width(40));
-            if (float.TryParse(textVal, out float parsed))
-                newVal = parsed;
-            if (GUILayout.Button("-", _buttonStyle, GUILayout.Width(25)))
-                newVal = Mathf.Max(min, newVal - step);
-            if (GUILayout.Button("+", _buttonStyle, GUILayout.Width(25)))
-                newVal = Mathf.Min(max, newVal + step);
-            GUILayout.EndHorizontal();
-            return newVal;
-        }
-
         private void ResetValues()
         {
+            // Reset local simple values
             speed = 10f;
             gravity = originalGravity;
             power = originalPower;
             lugHeight = originalLugHeight;
             trackLength = originalTrackLength;
             pitchFactor = originalPitchFactor;
-            lightR = 1f;
-            lightG = 1f;
-            lightB = 1f;
-            lightA = 1f;
+
             notdriverInvincible = true;
             test = false;
+
+            // If we want to revert the reflection-based fields, call:
+            // _sledParameterManager.RevertParameters();
+            // Then RePopulateFields() to refresh the GUI data.
         }
 
+        // === HELPER PARSING FOR VECTORS ===
+        private bool TryParseVector2(string input, out Vector2 vector)
+        {
+            vector = Vector2.zero;
+            if (string.IsNullOrEmpty(input)) return false;
+            string[] parts = input.Split(',');
+            if (parts.Length != 2) return false;
+            float x, y;
+            if (float.TryParse(parts[0], out x) && float.TryParse(parts[1], out y))
+            {
+                vector = new Vector2(x, y);
+                return true;
+            }
+            return false;
+        }
+
+        private bool TryParseVector3(string input, out Vector3 vector)
+        {
+            vector = Vector3.zero;
+            if (string.IsNullOrEmpty(input)) return false;
+            string[] parts = input.Split(',');
+            if (parts.Length != 3) return false;
+            float x, y, z;
+            if (float.TryParse(parts[0], out x) &&
+                float.TryParse(parts[1], out y) &&
+                float.TryParse(parts[2], out z))
+            {
+                vector = new Vector3(x, y, z);
+                return true;
+            }
+            return false;
+        }
+
+        private bool TryParseVector4(string input, out Vector4 vector)
+        {
+            vector = Vector4.zero;
+            if (string.IsNullOrEmpty(input)) return false;
+            string[] parts = input.Split(',');
+            if (parts.Length != 4) return false;
+            float x, y, z, w;
+            if (float.TryParse(parts[0], out x) &&
+                float.TryParse(parts[1], out y) &&
+                float.TryParse(parts[2], out z) &&
+                float.TryParse(parts[3], out w))
+            {
+                vector = new Vector4(x, y, z, w);
+                return true;
+            }
+            return false;
+        }
+
+        // === WINDOW SIZING / MOVING ===
         private void HandleResize()
         {
             Vector2 mousePos = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
@@ -854,7 +832,8 @@ namespace SledTunerProject
                 "  - Use the window buttons to Minimize, Maximize, or Close the menu.\n" +
                 "  - Footer buttons include toggles for Ragdoll, Tree Renderer, and Teleport.\n" +
                 "  - In Advanced view, use the 'Tree View' toggle to collapse or expand components.\n" +
-                "  - 'Switch View' toggles between Advanced and Simple tuner menus.\n", _labelStyle);
+                "  - 'Switch View' toggles between Advanced and Simple tuner menus.\n",
+                _labelStyle);
             GUILayout.EndVertical();
         }
 
