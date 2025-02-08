@@ -30,10 +30,10 @@ namespace SledTunerProject
         private GUIStyle _headerStyle;
 
         // === ADDITIONAL FEATURES STATE ===
-        private bool _manualApply = true;        // If true, changes take effect only after pressing "Apply".
-        private bool _showHelp = false;          // Toggle for help panel.
-        private bool _advancedView = true;       // _advancedView = true -> full tuner menu; false -> simple tuner menu.
-        private bool _treeViewEnabled = true;    // If true in Advanced view, parameters are collapsible.
+        private bool _manualApply = true;       // If true, changes take effect only after pressing "Apply".
+        private bool _showHelp = false;         // Toggle for help panel.
+        private bool _advancedView = true;      // _advancedView = true => full tuner menu; false => simple tuner menu.
+        private bool _treeViewEnabled = true;   // If true in Advanced view, parameters are collapsible.
 
         // === WINDOW CONTROLS & RESIZING ===
         private bool _isMinimized = false;
@@ -42,7 +42,7 @@ namespace SledTunerProject
         private Vector2 _resizeStartMousePos;
         private Rect _resizeStartWindowRect;
         private ResizeEdges _resizeEdges;
-        private float _opacity = 1f;             // 0 = transparent, 1 = opaque
+        private float _opacity = 1f;            // 0 = transparent, 1 = opaque
 
         private struct ResizeEdges
         {
@@ -50,7 +50,7 @@ namespace SledTunerProject
         }
 
         // === SIMPLE VIEW LOCAL PARAMETERS ===
-        // (We keep these for simple view sliders, except color now unified via reflection.)
+        // (Color channels now handled via reflection. We keep local fields for other parameters only.)
         private float speed = 10f;
         private float gravity = -9.81f;
         private float power = 143000f;
@@ -62,7 +62,7 @@ namespace SledTunerProject
         private bool test = false;
         private bool apply = false;
 
-        // Original values for Reset (for simple view)
+        // Original values for Reset (for Simple View)
         private float originalPower = 143000f;
         private float originalLugHeight = 0.18f;
         private float originalTrackLength = 1f;
@@ -104,7 +104,7 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Refresh the field inputs from SledParameterManager for both Simple & Advanced views.
+        /// Refreshes the field inputs from SledParameterManager for both Simple & Advanced views.
         /// </summary>
         public void RePopulateFields()
         {
@@ -271,7 +271,7 @@ namespace SledTunerProject
             GUILayout.Label("Pitch Factor");
             pitchFactor = FloatFieldWithSlider(pitchFactor, 2f, 30f, 0.1f);
 
-            // === Now unify the color channels with reflection-based logic ===
+            // === Unify color channels with reflection-based logic ===
             GUILayout.Space(10);
             GUILayout.Label("Headlight Color (RGBA)");
 
@@ -311,12 +311,11 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Draw only the Light r/g/b/a fields via reflection, with sliders and +/- buttons.
-        /// Called by Simple Tuner as well, so code is unified.
+        /// Draw only the Light r/g/b/a fields via reflection, with sliders and +/- buttons,
+        /// using friendly labels Red/Green/Blue/Alpha. This is used by both Simple and Advanced views.
         /// </summary>
         private void DrawColorFieldsFromReflection(string compName, Dictionary<string, string> lightFields)
         {
-            // We expect "r", "g", "b", "a" keys
             string[] channels = { "r", "g", "b", "a" };
             foreach (string channel in channels)
             {
@@ -327,7 +326,7 @@ namespace SledTunerProject
                 }
 
                 // Parse current value
-                float currentVal;
+                float currentVal = 0f;
                 float.TryParse(lightFields[channel], out currentVal);
 
                 // We'll do a slider from 0..1, step = 0.1
@@ -339,21 +338,11 @@ namespace SledTunerProject
                 string channelLabel;
                 switch (channel)
                 {
-                    case "r":
-                        channelLabel = "Red";
-                        break;
-                    case "g":
-                        channelLabel = "Green";
-                        break;
-                    case "b":
-                        channelLabel = "Blue";
-                        break;
-                    case "a":
-                        channelLabel = "Alpha";
-                        break;
-                    default:
-                        channelLabel = channel;
-                        break;
+                    case "r": channelLabel = "Red"; break;
+                    case "g": channelLabel = "Green"; break;
+                    case "b": channelLabel = "Blue"; break;
+                    case "a": channelLabel = "Alpha"; break;
+                    default: channelLabel = channel; break;
                 }
 
                 GUILayout.BeginHorizontal();
@@ -361,7 +350,8 @@ namespace SledTunerProject
 
                 float newVal = GUILayout.HorizontalSlider(currentVal, sliderMin, sliderMax, GUILayout.Width(150));
                 string newText = GUILayout.TextField(newVal.ToString("F2"), _textFieldStyle, GUILayout.Width(40));
-                if (float.TryParse(newText, out float parsedVal))
+                float parsedVal;
+                if (float.TryParse(newText, out parsedVal))
                     newVal = parsedVal;
 
                 if (GUILayout.Button("-", _buttonStyle, GUILayout.Width(25)))
@@ -390,7 +380,7 @@ namespace SledTunerProject
                 GUILayout.Label("<b>Component: " + comp.Key + "</b>", _labelStyle);
                 DrawSimpleParametersForComponent(comp.Key, comp.Value);
 
-                // If Light, show a color preview block
+                // If Light, show a color preview
                 if (comp.Key == "Light")
                 {
                     GUILayout.Space(5);
@@ -444,13 +434,22 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// This method is used by the Advanced view for reflection-based parameters.
-        /// The Simple view calls a separate approach for local fields except we unify Light color with reflection.
+        /// Used by Advanced view to draw reflection-based parameters.
+        /// The Simple view uses local fields for most data 
+        /// but also uses reflection for the Light color channels. 
         /// </summary>
         private void DrawSimpleParametersForComponent(string compName, Dictionary<string, string> fields)
         {
             foreach (var field in fields)
             {
+                // If this is the Light color channel, skip direct float approach 
+                // because we want the custom color slider logic for Red/Green/Blue/Alpha.
+                if (compName == "Light" && (field.Key == "r" || field.Key == "g" || field.Key == "b" || field.Key == "a"))
+                {
+                    // We'll let DrawColorFieldsFromReflection handle it instead.
+                    continue;
+                }
+
                 GUILayout.BeginHorizontal();
                 GUILayout.Label(field.Key + ":", _labelStyle, GUILayout.Width(150));
                 Type fieldType = _sledParameterManager.GetFieldType(compName, field.Key);
@@ -458,7 +457,7 @@ namespace SledTunerProject
                 // Retrieve the string from _fieldInputs
                 string fieldStringVal = field.Value;
 
-                // === float/int/double handling
+                // float/int/double
                 if (fieldType == typeof(float) || fieldType == typeof(int) || fieldType == typeof(double))
                 {
                     double currentVal = 0.0;
@@ -471,7 +470,8 @@ namespace SledTunerProject
                     // Draw as float slider, store double behind the scenes
                     float newValFloat = GUILayout.HorizontalSlider((float)currentVal, sliderMin, sliderMax, GUILayout.Width(150));
                     string newText = GUILayout.TextField(newValFloat.ToString("F2"), _textFieldStyle, GUILayout.Width(50));
-                    if (float.TryParse(newText, out float parsedVal))
+                    float parsedVal;
+                    if (float.TryParse(newText, out parsedVal))
                         newValFloat = parsedVal;
 
                     GUILayout.BeginHorizontal(GUILayout.Width(60));
@@ -520,6 +520,13 @@ namespace SledTunerProject
                     }
                 }
                 GUILayout.EndHorizontal();
+            }
+
+            // Now we draw the Light color channels if compName == "Light"
+            // so the advanced view also has the nice Red/Green/Blue/Alpha sliders+buttons:
+            if (compName == "Light" && fields != null)
+            {
+                DrawColorFieldsFromReflection(compName, fields);
             }
         }
 
