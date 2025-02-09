@@ -93,8 +93,8 @@ namespace SledTunerProject
                 },
                 ["Rigidbody"] = new string[]
                 {
-                    "mass", "drag", "angularDrag", "useGravity", "maxAngularVelocity",
-                    "constraints", "interpolation", "collisionDetectionMode"
+                    "mass", "drag", "angularDrag", "useGravity", "maxAngularVelocity"
+                    
                 },
                 ["Light"] = new string[] { "r", "g", "b", "a" },
 
@@ -231,9 +231,6 @@ namespace SledTunerProject
                 ["angularDrag"] = new ParameterMetadata("Angular Drag", "Angular drag", 0f, 10f),
                 ["useGravity"] = new ParameterMetadata("Use Gravity", "Toggle gravity usage", 0f, 1f, ControlType.Toggle),
                 ["maxAngularVelocity"] = new ParameterMetadata("Max Angular Velocity", "Max angular velocity", 0f, 100f),
-                ["constraints"] = new ParameterMetadata("Constraints", "Rigidbody constraints", 0f, 6f),
-                ["interpolation"] = new ParameterMetadata("Interpolation", "Rigidbody interpolation", 0f, 2f),
-                ["collisionDetectionMode"] = new ParameterMetadata("Collision Detection Mode", "Collision detection mode", 0f, 3f)
             };
 
             // Light
