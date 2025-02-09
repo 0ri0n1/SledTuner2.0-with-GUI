@@ -600,6 +600,7 @@ namespace SledTunerProject
             }
         }
 
+        // Updated conversion method to handle numeric types properly (especially converting boxed doubles to float)
         private object ConvertValue(object raw, Type targetType)
         {
             if (raw == null || targetType == null)
@@ -607,19 +608,27 @@ namespace SledTunerProject
 
             try
             {
-                if (targetType == typeof(float) && raw is double dVal)
-                    return (float)dVal;
-                if (targetType == typeof(int) && raw is long lVal)
-                    return (int)lVal;
-                if (targetType == typeof(bool) && raw is bool bVal)
-                    return bVal;
+                if (targetType == typeof(float))
+                {
+                    return Convert.ToSingle(raw);
+                }
+                if (targetType == typeof(int))
+                {
+                    return Convert.ToInt32(raw);
+                }
+                if (targetType == typeof(bool))
+                {
+                    return Convert.ToBoolean(raw);
+                }
                 if (targetType.IsInstanceOfType(raw))
+                {
                     return raw;
-
+                }
                 return Convert.ChangeType(raw, targetType);
             }
-            catch
+            catch (Exception ex)
             {
+                MelonLogger.Error($"[SledTuner] Error converting value {raw} to {targetType}: {ex.Message}");
                 return raw;
             }
         }
