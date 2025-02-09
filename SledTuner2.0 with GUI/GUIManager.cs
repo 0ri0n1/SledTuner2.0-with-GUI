@@ -15,13 +15,14 @@ namespace SledTunerProject
         private bool _menuOpen = false;
         private Rect _windowRect;
         private Vector2 _scrollPos = Vector2.zero;
-        // Reflection-based parameters: Component -> (Field -> string value)
+        // Reflection-based parameters (string-based for display):
+        //   Component -> (Field -> string)
         private Dictionary<string, Dictionary<string, string>> _fieldInputs
             = new Dictionary<string, Dictionary<string, string>>();
         // For Advanced Tree View foldouts
         private Dictionary<string, bool> _foldoutStates = new Dictionary<string, bool>();
 
-        // === GUI STYLES (set in OnGUI if null) ===
+        // === GUI STYLES (initialized in OnGUI if null) ===
         private GUIStyle _windowStyle;
         private GUIStyle _labelStyle;
         private GUIStyle _textFieldStyle;
@@ -31,7 +32,7 @@ namespace SledTunerProject
         private GUIStyle _headerStyle;
 
         // === ADDITIONAL FEATURES STATE ===
-        private bool _manualApply = true;  // If true, only apply changes after "Apply".
+        private bool _manualApply = true;  // If true, changes only commit after "Apply".
         private bool _showHelp = false;
         private bool _advancedView = true; // Switch between Simple/Advanced
         private bool _treeViewEnabled = true; // Collapsible advanced parameters
@@ -72,17 +73,15 @@ namespace SledTunerProject
         // === COLOR PREVIEW TEXTURE ===
         private Texture2D _colorPreviewTexture;
 
-        // === LOCAL PREVIEW FOR REFLECTION FIELDS ===
-        // We'll store numeric previews in _fieldPreview[compName][fieldName].
-        // Only when user releases the +/- button or clicks "Apply" do we commit changes to the game.
+        // === LOCAL PREVIEW FOR REFLECTION FIELDS (ADVANCED) ===
+        // For numeric fields, we store the "live" double in _fieldPreview[compName][fieldName].
+        // Only on button release or "Apply" do we commit to SledParameterManager.
         private Dictionary<string, Dictionary<string, double>> _fieldPreview
             = new Dictionary<string, Dictionary<string, double>>();
 
-        // For minus/plus detection: 
-        // We store which fields are currently held vs previously held to detect release.
+        // For minus/plus detection in reflection-based fields:
         private HashSet<string> _minusHeldNow = new HashSet<string>();
         private HashSet<string> _minusHeldPrev = new HashSet<string>();
-
         private HashSet<string> _plusHeldNow = new HashSet<string>();
         private HashSet<string> _plusHeldPrev = new HashSet<string>();
 
@@ -107,7 +106,7 @@ namespace SledTunerProject
 
         /// <summary>
         /// Toggles the menu. On open, we populate from SledParameterManager
-        /// but do not repopulate each frame while pressing +/-.
+        /// but do not re-run reflection each time a user presses +/-.
         /// </summary>
         public void ToggleMenu()
         {
@@ -125,16 +124,14 @@ namespace SledTunerProject
 
         /// <summary>
         /// Loads current param data from SledParameterManager into local dictionaries
-        /// so we do not have to re-run reflection mid-press.
+        /// so we do not have to re-run reflection or cause flicker mid-press.
         /// </summary>
         public void RePopulateFields()
         {
             _fieldInputs.Clear();
             _fieldPreview.Clear();
 
-            Dictionary<string, Dictionary<string, object>> currentParams
-                = _sledParameterManager.GetCurrentParameters();
-
+            var currentParams = _sledParameterManager.GetCurrentParameters();
             foreach (var compEntry in _sledParameterManager.ComponentsToInspect)
             {
                 string compName = compEntry.Key;
@@ -157,7 +154,6 @@ namespace SledTunerProject
                         if (double.TryParse(valStr, out tryD))
                             numericVal = tryD;
                     }
-
                     _fieldPreview[compName][field] = numericVal;
                 }
             }
@@ -171,18 +167,17 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Main IMGUI entry point. 
-        /// We do not re-run reflection on each press; we only update local variables.
+        /// Main IMGUI draw call. 
+        /// We do not re-run reflection each time; we only manipulate local data.
         /// </summary>
         public void DrawMenu()
         {
             if (!_menuOpen)
                 return;
 
-            // Move "now" sets to "prev" sets, clear now sets
+            // Move 'now' sets to 'prev' sets, then clear 'now'
             _minusHeldPrev = new HashSet<string>(_minusHeldNow);
             _plusHeldPrev = new HashSet<string>(_plusHeldNow);
-
             _minusHeldNow.Clear();
             _plusHeldNow.Clear();
 
@@ -223,7 +218,7 @@ namespace SledTunerProject
             else
                 DrawSimpleTunerMenu();
 
-            // On Repaint, detect newly released minus/plus so we can commit reflection fields once
+            // On Repaint, detect newly released minus/plus => commit reflection fields if needed
             if (Event.current.type == EventType.Repaint)
             {
                 DetectButtonReleases();
@@ -233,12 +228,10 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// If a minus/plus was held previously but not this frame, 
-        /// the user just released it => commit reflection-based changes if needed.
+        /// If a minus/plus was held last frame but not this frame => user just released => commit reflection-based changes.
         /// </summary>
         private void DetectButtonReleases()
         {
-            // minus release
             foreach (string key in _minusHeldPrev)
             {
                 if (!_minusHeldNow.Contains(key))
@@ -246,7 +239,6 @@ namespace SledTunerProject
                     CommitReflectionFieldIfNeeded(key);
                 }
             }
-            // plus release
             foreach (string key in _plusHeldPrev)
             {
                 if (!_plusHeldNow.Contains(key))
@@ -258,29 +250,27 @@ namespace SledTunerProject
 
         private void CommitReflectionFieldIfNeeded(string fieldKey)
         {
-            // e.g. "MeshInterpretter.power.minus"
+            // e.g. "MeshInterpretter.power.minus" => parse out compName + "." + fieldName + ".minus"
             if (fieldKey.StartsWith("simple."))
             {
-                // local simple fields we do not forcibly commit to SledParameterManager here
+                // local simple fields => not reflection => no commit
                 return;
             }
 
-            // parse compName + "." + fieldName + ".minus"
+            // parse
             string[] tokens = fieldKey.Split('.');
-            if (tokens.Length < 3)
-                return;
+            if (tokens.Length < 3) return;
 
             string compName = tokens[0];
             string fieldName = tokens[1];
-            // get local numeric preview
+
             if (!_fieldPreview.ContainsKey(compName) ||
                 !_fieldPreview[compName].ContainsKey(fieldName))
                 return;
 
             double finalVal = _fieldPreview[compName][fieldName];
-            // commit to the manager
-            _sledParameterManager.SetFieldValue(compName, fieldName, finalVal);
 
+            _sledParameterManager.SetFieldValue(compName, fieldName, finalVal);
             if (!_manualApply)
             {
                 _sledParameterManager.ApplyParameters();
@@ -370,11 +360,17 @@ namespace SledTunerProject
             pitchFactor = DrawLocalFloatField("simple.pitchFactor", pitchFactor, 2f, 30f);
 
             GUILayout.Space(10);
+
+            // Now we unify color channels for "Light" (both simple & advanced can call the same code).
             GUILayout.Label("Headlight Color (RGBA)");
             if (_fieldInputs.ContainsKey("Light"))
-                DrawLocalColorFields("Light");
+            {
+                DrawColorChannelsCommon("Light", isAdvanced: false);
+            }
             else
+            {
                 GUILayout.Label("(No Light component found)", _labelStyle);
+            }
 
             // color preview
             float rVal = 1f, gVal = 1f, bVal = 1f, aVal = 1f;
@@ -401,10 +397,9 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Local-only float field for the simple tuner. 
-        /// We do not commit each frame to SledParameterManager. 
-        /// Instead, we store changes in local variables. 
-        /// The user sees them in real-time. 
+        /// Single-step local approach for simple tuner float fields.
+        /// We do NOT commit to SledParameterManager each frame,
+        /// we only store changes in local variable for the user to see.
         /// </summary>
         private float DrawLocalFloatField(string uniqueKey, float currentVal, float min, float max)
         {
@@ -434,11 +429,8 @@ namespace SledTunerProject
             // On Repaint, do a single step if held
             if (Event.current.type == EventType.Repaint)
             {
-                // If minus is held, step down by 0.01
                 if (_minusHeldNow.Contains(minusKey))
                     newVal = Mathf.Max(min, newVal - 0.01f);
-
-                // If plus is held, step up by 0.01
                 if (_plusHeldNow.Contains(plusKey))
                     newVal = Mathf.Min(max, newVal + 0.01f);
             }
@@ -446,21 +438,24 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Local color channels for the simple tuner "Light" in the main UI. 
-        /// We only store them in _fieldInputs until user hits Apply or toggles manual apply logic.
+        /// Draw color channels for "Light" from the same code,
+        /// used by both Simple (isAdvanced=false) and Advanced (isAdvanced=true).
         /// </summary>
-        private void DrawLocalColorFields(string compName)
+        private void DrawColorChannelsCommon(string compName, bool isAdvanced)
         {
-            string[] channels = { "r", "g", "b", "a" };
-            var dict = _fieldInputs[compName];
+            // compName should be "Light"
+            if (!_fieldInputs.ContainsKey(compName))
+                return;
 
+            string[] channels = { "r", "g", "b", "a" };
             foreach (string ch in channels)
             {
-                if (!dict.ContainsKey(ch))
+                if (!_fieldInputs[compName].ContainsKey(ch))
                     continue;
 
-                float.TryParse(dict[ch], out float currentVal);
-                float newVal = currentVal;
+                if (!float.TryParse(_fieldInputs[compName][ch], out float curVal))
+                    curVal = 0f;
+                float newVal = curVal;
 
                 GUILayout.BeginHorizontal();
                 string label = (ch == "r") ? "Red" :
@@ -469,7 +464,6 @@ namespace SledTunerProject
                                (ch == "a") ? "Alpha" : ch;
 
                 GUILayout.Label(label + ":", _labelStyle, GUILayout.Width(40));
-
                 newVal = GUILayout.HorizontalSlider(newVal, 0f, 1f, GUILayout.Width(150));
                 string textVal = GUILayout.TextField(newVal.ToString("F2"), _textFieldStyle, GUILayout.Width(40));
                 if (float.TryParse(textVal, out float parsedVal))
@@ -489,7 +483,6 @@ namespace SledTunerProject
 
                 GUILayout.EndHorizontal();
 
-                // On Repaint, step by 0.01 if minus/plus is held
                 if (Event.current.type == EventType.Repaint)
                 {
                     if (_minusHeldNow.Contains(minusKey))
@@ -498,26 +491,42 @@ namespace SledTunerProject
                         newVal = Mathf.Min(1f, newVal + 0.01f);
                 }
 
-                if (Mathf.Abs(newVal - currentVal) > 0.0001f)
+                if (Mathf.Abs(newVal - curVal) > 0.0001f)
                 {
-                    dict[ch] = newVal.ToString("F2");
+                    // update the UI string
+                    _fieldInputs[compName][ch] = newVal.ToString("F2");
+
+                    if (isAdvanced)
+                    {
+                        // In advanced mode, we also store numeric in _fieldPreview
+                        // so that final commit can happen on release or 'Apply'
+                        if (_fieldPreview.ContainsKey(compName) &&
+                            _fieldPreview[compName].ContainsKey(ch))
+                        {
+                            _fieldPreview[compName][ch] = newVal;
+                        }
+                    }
                 }
             }
         }
 
         /// <summary>
-        /// Reflection-based parameters in a flat list (when TreeView is off).
+        /// Reflection-based advanced parameters in a flat list. 
+        /// We'll skip color channels in the normal numeric loop below 
+        /// and call DrawColorChannelsCommon for 'Light'.
         /// </summary>
         private void DrawAdvancedFlatParameters()
         {
             foreach (var comp in _fieldInputs)
             {
                 GUILayout.Label("<b>Component: " + comp.Key + "</b>", _labelStyle);
-                DrawReflectionParameters(comp.Key, comp.Value);
 
-                // color preview if Light
                 if (comp.Key == "Light")
                 {
+                    // unify color channels
+                    DrawColorChannelsCommon("Light", isAdvanced: true);
+
+                    // color preview
                     GUILayout.Space(5);
                     GUILayout.Label("Color Preview:", _labelStyle);
                     float r = 1f, g = 1f, b = 1f, a = 1f;
@@ -529,6 +538,11 @@ namespace SledTunerProject
                     UpdateColorPreviewTexture(previewColor);
                     GUILayout.Box(_colorPreviewTexture, GUILayout.Width(30), GUILayout.Height(30));
                 }
+                else
+                {
+                    DrawReflectionParameters(comp.Key, comp.Value);
+                }
+
                 GUILayout.Space(10);
             }
         }
@@ -549,10 +563,13 @@ namespace SledTunerProject
                 if (_foldoutStates[comp.Key])
                 {
                     GUILayout.BeginVertical(GUI.skin.box);
-                    DrawReflectionParameters(comp.Key, comp.Value);
 
                     if (comp.Key == "Light")
                     {
+                        // unify color channels
+                        DrawColorChannelsCommon("Light", isAdvanced: true);
+
+                        // color preview
                         GUILayout.Space(5);
                         GUILayout.Label("Color Preview:", _labelStyle);
                         float r = 1f, g = 1f, b = 1f, a = 1f;
@@ -564,6 +581,11 @@ namespace SledTunerProject
                         UpdateColorPreviewTexture(previewColor);
                         GUILayout.Box(_colorPreviewTexture, GUILayout.Width(30), GUILayout.Height(30));
                     }
+                    else
+                    {
+                        DrawReflectionParameters(comp.Key, comp.Value);
+                    }
+
                     GUILayout.EndVertical();
                 }
                 GUILayout.Space(10);
@@ -571,17 +593,17 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Reflection-based numeric/bool fields. We keep a local double in _fieldPreview,
-        /// so pressing +/- only updates the local preview. 
-        /// Actual commit to the SledParameterManager occurs when the button is released,
-        /// or if the user hits "Apply" (if _manualApply is false, we do it automatically).
+        /// Reflection-based numeric/bool fields. 
+        /// For color channels, we skip them here and call DrawColorChannelsCommon. 
+        /// For numeric fields, we store local changes in _fieldPreview. 
+        /// Only on button release or 'Apply' do we commit to SledParameterManager.
         /// </summary>
         private void DrawReflectionParameters(string compName, Dictionary<string, string> fields)
         {
             foreach (var kvp in fields)
             {
                 string fieldName = kvp.Key;
-                // skip Light color channels => separate logic
+                // skip color channels for Light => handled in DrawColorChannelsCommon
                 if (compName == "Light" &&
                     (fieldName == "r" || fieldName == "g" || fieldName == "b" || fieldName == "a"))
                 {
@@ -592,25 +614,26 @@ namespace SledTunerProject
                 GUILayout.Label(fieldName + ":", _labelStyle, GUILayout.Width(150));
 
                 Type fieldType = _sledParameterManager.GetFieldType(compName, fieldName);
-
-                // local numeric preview
-                double currentVal = _fieldPreview[compName][fieldName];
+                double currentVal = _fieldPreview[compName][fieldName]; // numeric preview
 
                 if (fieldType == typeof(float) || fieldType == typeof(double) || fieldType == typeof(int))
                 {
                     float sliderMin = _sledParameterManager.GetSliderMin(compName, fieldName);
                     float sliderMax = _sledParameterManager.GetSliderMax(compName, fieldName);
 
-                    // single step = 0.01 for float/double, or 1.0 if int
                     double step = (fieldType == typeof(int)) ? 1.0 : 0.01;
 
-                    // show slider
+                    // draw slider
                     float sliderVal = GUILayout.HorizontalSlider(
                         (float)currentVal, sliderMin, sliderMax, GUILayout.Width(150)
                     );
 
                     // user text
-                    string newText = GUILayout.TextField(sliderVal.ToString("F2"), _textFieldStyle, GUILayout.Width(50));
+                    string newText = GUILayout.TextField(
+                        sliderVal.ToString("F2"),
+                        _textFieldStyle,
+                        GUILayout.Width(50)
+                    );
                     if (float.TryParse(newText, out float parsedVal))
                     {
                         sliderVal = parsedVal;
@@ -627,12 +650,10 @@ namespace SledTunerProject
                     bool plusHeld = GUILayout.RepeatButton("+", _buttonStyle, GUILayout.Width(25));
                     if (plusHeld)
                         _plusHeldNow.Add(plusKey);
-
                     GUILayout.EndHorizontal();
 
                     double finalVal = (double)sliderVal;
 
-                    // apply single step if held (on Repaint)
                     if (Event.current.type == EventType.Repaint)
                     {
                         if (_minusHeldNow.Contains(minusKey))
@@ -641,7 +662,6 @@ namespace SledTunerProject
                             finalVal = Math.Min(sliderMax, finalVal + step);
                     }
 
-                    // if changed
                     if (Math.Abs(finalVal - currentVal) > 0.0001)
                     {
                         _fieldPreview[compName][fieldName] = finalVal;
@@ -650,14 +670,14 @@ namespace SledTunerProject
                 }
                 else if (fieldType == typeof(bool))
                 {
+                    // parse as bool
                     bool curBool = false;
                     bool.TryParse(_fieldInputs[compName][fieldName], out curBool);
                     bool newBool = GUILayout.Toggle(curBool, curBool ? "On" : "Off", _toggleStyle, GUILayout.Width(80));
                     if (newBool != curBool)
                     {
                         _fieldInputs[compName][fieldName] = newBool.ToString();
-
-                        // commit immediately if not manual
+                        // if manual is off, commit immediately
                         if (!_manualApply)
                         {
                             _sledParameterManager.SetFieldValue(compName, fieldName, newBool);
@@ -734,33 +754,44 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// If user hits "Apply" or we do it automatically, we commit the reflection fields from local preview.
-        /// Simple fields remain local unless we want to push them too (excluded here for brevity).
+        /// Called by "Apply" button. Commits advanced reflection fields from _fieldPreview
+        /// to the SledParameterManager. Simple fields remain local unless we want to sync them too.
         /// </summary>
         private void ApplyChanges()
         {
-            // For reflection-based fields, commit from _fieldPreview
+            // commit reflection-based fields
             foreach (var compKvp in _fieldPreview)
             {
                 string compName = compKvp.Key;
                 foreach (var fieldKvp in compKvp.Value)
                 {
                     string fieldName = fieldKvp.Key;
-                    double finalVal = fieldKvp.Value;
+                    double val = fieldKvp.Value;
 
                     Type ft = _sledParameterManager.GetFieldType(compName, fieldName);
                     if (ft == typeof(float) || ft == typeof(double) || ft == typeof(int))
                     {
-                        _sledParameterManager.SetFieldValue(compName, fieldName, finalVal);
+                        _sledParameterManager.SetFieldValue(compName, fieldName, val);
                     }
                     else if (ft == typeof(bool))
                     {
-                        // retrieve from _fieldInputs if it's bool
                         bool b;
                         bool.TryParse(_fieldInputs[compName][fieldName], out b);
                         _sledParameterManager.SetFieldValue(compName, fieldName, b);
                     }
-                    // for color channels, you'd parse them from _fieldInputs if you want "Apply" to commit
+                    else if (compName == "Light" &&
+                             (fieldName == "r" || fieldName == "g" || fieldName == "b" || fieldName == "a"))
+                    {
+                        // If we want to commit color channels on Apply:
+                        // parse from _fieldInputs and do SetFieldValue
+                        if (_fieldInputs[compName].TryGetValue(fieldName, out string channelStr))
+                        {
+                            if (float.TryParse(channelStr, out float cVal))
+                            {
+                                _sledParameterManager.SetFieldValue(compName, fieldName, cVal);
+                            }
+                        }
+                    }
                 }
             }
             _sledParameterManager.ApplyParameters();
@@ -779,99 +810,6 @@ namespace SledTunerProject
 
             notdriverInvincible = true;
             test = false;
-        }
-
-        // === HELPER PARSING for reflection-based text => object
-        private object ConvertInput(string input, Type targetType)
-        {
-            if (targetType == typeof(float))
-            {
-                if (float.TryParse(input, out float f))
-                    return f;
-                return 0f;
-            }
-            else if (targetType == typeof(int))
-            {
-                if (int.TryParse(input, out int i))
-                    return i;
-                return 0;
-            }
-            else if (targetType == typeof(bool))
-            {
-                if (bool.TryParse(input, out bool b))
-                    return b;
-                return false;
-            }
-            else if (targetType == typeof(double))
-            {
-                if (double.TryParse(input, out double d))
-                    return d;
-                return 0.0;
-            }
-            else if (targetType == typeof(Vector2))
-            {
-                if (TryParseVector2(input, out Vector2 v2)) return v2;
-                return Vector2.zero;
-            }
-            else if (targetType == typeof(Vector3))
-            {
-                if (TryParseVector3(input, out Vector3 v3)) return v3;
-                return Vector3.zero;
-            }
-            else if (targetType == typeof(Vector4))
-            {
-                if (TryParseVector4(input, out Vector4 v4)) return v4;
-                return Vector4.zero;
-            }
-            return input;
-        }
-
-        private bool TryParseVector2(string input, out Vector2 vector)
-        {
-            vector = Vector2.zero;
-            if (string.IsNullOrEmpty(input)) return false;
-            string[] parts = input.Split(',');
-            if (parts.Length != 2) return false;
-            if (float.TryParse(parts[0], out float x) &&
-                float.TryParse(parts[1], out float y))
-            {
-                vector = new Vector2(x, y);
-                return true;
-            }
-            return false;
-        }
-
-        private bool TryParseVector3(string input, out Vector3 vector)
-        {
-            vector = Vector3.zero;
-            if (string.IsNullOrEmpty(input)) return false;
-            string[] parts = input.Split(',');
-            if (parts.Length != 3) return false;
-            if (float.TryParse(parts[0], out float x) &&
-                float.TryParse(parts[1], out float y) &&
-                float.TryParse(parts[2], out float z))
-            {
-                vector = new Vector3(x, y, z);
-                return true;
-            }
-            return false;
-        }
-
-        private bool TryParseVector4(string input, out Vector4 vector)
-        {
-            vector = Vector4.zero;
-            if (string.IsNullOrEmpty(input)) return false;
-            string[] parts = input.Split(',');
-            if (parts.Length != 4) return false;
-            if (float.TryParse(parts[0], out float x) &&
-                float.TryParse(parts[1], out float y) &&
-                float.TryParse(parts[2], out float z) &&
-                float.TryParse(parts[3], out float w))
-            {
-                vector = new Vector4(x, y, z, w);
-                return true;
-            }
-            return false;
         }
 
         private void HandleResize()
@@ -972,15 +910,13 @@ namespace SledTunerProject
             GUILayout.Label("<b>Help:</b>\n\n" +
                 "Hotkeys:\n  F2 - Toggle Menu\n  F3 - Refresh Fields\n\n" +
                 "Instructions:\n" +
-                "  - Adjust parameters with sliders, text fields, or +/- (click-and-hold) buttons.\n" +
-                "  - All changes happen locally in the UI until you release the button.\n" +
-                "  - If 'Manual Apply' is off, fields commit automatically on release; otherwise on 'Apply'.\n" +
-                "  - 'Reset' reverts to original values.\n" +
-                "  - 'Load' / 'Save' handle the JSON configuration.\n" +
-                "  - Use the window buttons to Minimize, Maximize, or Close.\n" +
-                "  - The footer buttons toggle Ragdoll, Tree Renderer, or Teleport.\n" +
-                "  - In Advanced view, use 'Tree View' to collapse/expand components.\n" +
-                "  - 'Switch View' toggles between Advanced and Simple.\n",
+                "  - Adjust parameters using sliders, text fields, or +/- (click-and-hold) buttons.\n" +
+                "  - Color channels for 'Light' are drawn the same in Simple/Advanced for easier maintenance.\n" +
+                "  - In Advanced mode, only on button release or 'Apply' do changes commit (if Manual Apply is off).\n" +
+                "  - If 'Manual Apply' is on, changes only commit when you press 'Apply'.\n" +
+                "  - Use window buttons to Minimize, Maximize, or Close.\n" +
+                "  - Footer toggles: Ragdoll, Tree Renderer, Teleport.\n" +
+                "  - 'Tree View' collapses advanced components. 'Switch View' toggles Simple/Advanced.\n",
                 _labelStyle);
             GUILayout.EndVertical();
         }
