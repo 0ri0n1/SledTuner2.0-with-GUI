@@ -1,11 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq.Expressions;
 using System.Reflection;
 using MelonLoader;
 using UnityEngine;
-using HarmonyLib; // For AccessTools
 
 namespace SledTunerProject
 {
@@ -25,26 +23,31 @@ namespace SledTunerProject
         private Dictionary<string, Dictionary<string, object>> _originalValues;
         private Dictionary<string, Dictionary<string, object>> _currentValues;
 
-        // Cached accessor dictionary (replacing the reflection-based MemberWrapper)
-        // Keyed by component name then by field/property name.
-        private readonly Dictionary<string, Dictionary<string, FieldAccessor>> _accessorCache
-            = new Dictionary<string, Dictionary<string, FieldAccessor>>();
+        // Reflection cache
+        private readonly Dictionary<string, Dictionary<string, MemberWrapper>> _reflectionCache = new Dictionary<string, Dictionary<string, MemberWrapper>>();
 
-        // Parameter metadata (unchanged)
+        // Parameter metadata
         private Dictionary<string, Dictionary<string, ParameterMetadata>> _parameterMetadata;
 
-        // Helper struct for compiled field/property accessors
-        private struct FieldAccessor
+        // Helper structure for caching fields/properties
+        private struct MemberWrapper
         {
-            public Func<object, object> Getter;
-            public Action<object, object> Setter;
-            public Type MemberType;
+            public FieldInfo Field;
+            public PropertyInfo Property;
+            public bool IsValid => Field != null || Property != null;
+            public bool CanRead => Field != null || (Property != null && Property.CanRead);
+            public bool CanWrite => Field != null || (Property != null && Property.CanWrite);
+            public Type MemberType => Field != null ? Field.FieldType : Property?.PropertyType;
         }
 
         // Constructor
         public SledParameterManager()
         {
-            // Define the components and field names to inspect
+            // Define the components and field names to inspect:
+            //   - "horizontalWeightTransferMode" and driverMaxDistance* removed from SnowmobileControllerBase
+            //   - "hard"/"soft" removed from Shock, replaced with "compression","mass","maxCompression","velocity"
+            //   - "ragdollThreshold"/"ragdollThresholdDownFactor" in RagDollCollisionController
+            //   - RBC "constraints","interpolation","collisionDetectionMode" not in user's snippet
             ComponentsToInspect = new Dictionary<string, string[]>
             {
                 ["SnowmobileController"] = new string[]
@@ -116,17 +119,17 @@ namespace SledTunerProject
         private void InitializeParameterMetadata()
         {
             _parameterMetadata = new Dictionary<string, Dictionary<string, ParameterMetadata>>();
-            // For brevity, assume user’s existing parameter metadata blocks remain:
+            // For brevity, assume your existing parameter metadata blocks remain:
             // e.g. SnowmobileController, SnowmobileControllerBase, MeshInterpretter, etc.
 
-            // Just reaffirm ragdoll metadata:
+            // Reaffirm ragdoll metadata:
             _parameterMetadata["RagDollCollisionController"] = new Dictionary<string, ParameterMetadata>
             {
                 ["ragdollThreshold"] = new ParameterMetadata("Ragdoll Threshold", "Threshold for ragdoll activation", 0f, 1000f),
                 ["ragdollThresholdDownFactor"] = new ParameterMetadata("Ragdoll Threshold Down Factor", "Down factor for ragdoll threshold", 0f, 10f)
             };
 
-            // (Other component metadata would be added similarly.)
+            // Add additional metadata for other components as needed.
         }
 
         public void InitializeComponents()
@@ -153,7 +156,7 @@ namespace SledTunerProject
             if (spotLightTransform != null)
                 _light = spotLightTransform.GetComponent<Light>();
 
-            BuildAccessorCache();
+            BuildReflectionCache();
             _originalValues = InspectSledComponents();
             _currentValues = InspectSledComponents();
 
@@ -225,10 +228,7 @@ namespace SledTunerProject
                 return null;
             }
 
-            PropertyInfo prop = controller.GetType().GetProperty(
-                "GKMNAIKNNMJ",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-            );
+            PropertyInfo prop = controller.GetType().GetProperty("GKMNAIKNNMJ", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             if (prop == null || !prop.CanRead)
             {
                 MelonLogger.Warning("[SledTuner] Property GKMNAIKNNMJ not found or unreadable.");
@@ -266,10 +266,10 @@ namespace SledTunerProject
 
         public Type GetFieldType(string componentName, string fieldName)
         {
-            if (_accessorCache.TryGetValue(componentName, out var dict) &&
-                dict.TryGetValue(fieldName, out var accessor))
+            if (_reflectionCache.TryGetValue(componentName, out var members) &&
+                members.TryGetValue(fieldName, out var wrapper))
             {
-                return accessor.MemberType;
+                return wrapper.MemberType;
             }
             return null;
         }
@@ -301,79 +301,88 @@ namespace SledTunerProject
             _currentValues[componentName][fieldName] = value;
         }
 
-        // === PRIVATE HELPER METHODS USING COMPILED ACCESSORS (HARMONY STYLE) ===
+        // === PRIVATE HELPER METHODS ===
 
-        /// <summary>
-        /// Builds (and caches) accessor delegates for all the fields/properties we want to inspect.
-        /// </summary>
-        private void BuildAccessorCache()
+        private void BuildReflectionCache()
         {
-            _accessorCache.Clear();
+            _reflectionCache.Clear();
 
             foreach (var kvp in ComponentsToInspect)
             {
                 string compName = kvp.Key;
                 string[] fields = kvp.Value;
                 Component comp = GetComponentByName(compName);
-                Dictionary<string, FieldAccessor> accessorDict = new Dictionary<string, FieldAccessor>();
+                Dictionary<string, MemberWrapper> memberDict = new Dictionary<string, MemberWrapper>();
 
                 if (comp != null)
                 {
                     Type type = comp.GetType();
                     foreach (string field in fields)
                     {
-                        // For Light color channels, we will handle manually later.
+                        MemberWrapper wrapper = new MemberWrapper();
+
+                        // Skip Light color channels (handled separately)
                         if (compName == "Light" && (field == "r" || field == "g" || field == "b" || field == "a"))
                         {
-                            continue;
-                        }
-
-                        // Try to get a FieldInfo first.
-                        FieldInfo fi = AccessTools.Field(type, field);
-                        if (fi != null)
-                        {
-                            accessorDict[field] = new FieldAccessor
-                            {
-                                Getter = CreateGetter(fi),
-                                Setter = CreateSetter(fi),
-                                MemberType = fi.FieldType
-                            };
+                            // No reflection needed for these.
                         }
                         else
                         {
-                            // If no field found, try to get a PropertyInfo.
-                            PropertyInfo pi = AccessTools.Property(type, field);
-                            if (pi != null)
+                            // Attempt standard reflection first
+                            FieldInfo fi = type.GetField(field, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                            if (fi != null)
                             {
-                                accessorDict[field] = new FieldAccessor
-                                {
-                                    Getter = CreateGetter(pi),
-                                    Setter = CreateSetter(pi),
-                                    MemberType = pi.PropertyType
-                                };
+                                wrapper.Field = fi;
                             }
                             else
                             {
-                                MelonLogger.Warning($"[SledTuner] Could not find field or property '{field}' in {compName}.");
+                                PropertyInfo pi = type.GetProperty(field, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                if (pi != null)
+                                    wrapper.Property = pi;
+                            }
+
+                            // If not found and we are dealing with RagDollCollisionController, check alternate spellings
+                            if (!wrapper.IsValid && compName == "RagDollCollisionController")
+                            {
+                                if (field == "ragdollThreshold" || field == "ragdollThresholdDownFactor")
+                                {
+                                    // Alternate spellings:
+                                    string altName = (field == "ragdollThreshold") ? "ragdollTreshold" : "ragdollTresholdDownFactor";
+
+                                    FieldInfo altFi = type.GetField(altName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                    if (altFi != null)
+                                    {
+                                        MelonLogger.Warning($"[SledTuner] Found alternate field '{altName}' for {compName}; using it for '{field}'.");
+                                        wrapper.Field = altFi;
+                                    }
+                                    else
+                                    {
+                                        PropertyInfo altPi = type.GetProperty(altName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                        if (altPi != null)
+                                        {
+                                            MelonLogger.Warning($"[SledTuner] Found alternate property '{altName}' for {compName}; using it for '{field}'.");
+                                            wrapper.Property = altPi;
+                                        }
+                                    }
+                                }
                             }
                         }
+
+                        memberDict[field] = wrapper;
                     }
                 }
                 else
                 {
-                    // If the component wasn’t found, add empty accessors so that later attempts can report “not found.”
+                    // If the component is not found, store empty wrappers for each field
                     foreach (string field in fields)
                     {
-                        accessorDict[field] = new FieldAccessor();
+                        memberDict[field] = new MemberWrapper();
                     }
                 }
-                _accessorCache[compName] = accessorDict;
+                _reflectionCache[compName] = memberDict;
             }
         }
 
-        /// <summary>
-        /// Uses the cached accessors to inspect each component and return its current values.
-        /// </summary>
         private Dictionary<string, Dictionary<string, object>> InspectSledComponents()
         {
             var result = new Dictionary<string, Dictionary<string, object>>();
@@ -392,6 +401,17 @@ namespace SledTunerProject
 
                 Dictionary<string, object> compValues = new Dictionary<string, object>();
 
+                if (!_reflectionCache.ContainsKey(compName))
+                {
+                    foreach (string field in fields)
+                    {
+                        compValues[field] = $"(No reflection cache for {field})";
+                    }
+                    result[compName] = compValues;
+                    continue;
+                }
+
+                // Read each field via TryReadMember
                 foreach (string field in fields)
                 {
                     compValues[field] = TryReadMember(comp, compName, field);
@@ -404,43 +424,36 @@ namespace SledTunerProject
             return result;
         }
 
-        /// <summary>
-        /// Uses the accessor delegate (if available) to read the value of a given field/property.
-        /// Special handling is provided for Light color channels.
-        /// </summary>
         private object TryReadMember(Component comp, string compName, string fieldName)
         {
-            // Special handling for Light color channels
+            // Handle Light color channels separately
             if (compName == "Light" && (fieldName == "r" || fieldName == "g" || fieldName == "b" || fieldName == "a"))
             {
                 var lightComp = (Light)comp;
                 Color c = lightComp.color;
                 switch (fieldName)
                 {
-                    case "r":
-                        return c.r;
-                    case "g":
-                        return c.g;
-                    case "b":
-                        return c.b;
-                    case "a":
-                        return c.a;
-                    default:
-                        return "(Not found: " + fieldName + ")";
+                    case "r": return c.r;
+                    case "g": return c.g;
+                    case "b": return c.b;
+                    case "a": return c.a;
+                    default: return "(Not found: " + fieldName + ")";
                 }
             }
 
-            if (!_accessorCache.TryGetValue(compName, out var accessorDict) ||
-                !accessorDict.TryGetValue(fieldName, out FieldAccessor accessor) ||
-                accessor.Getter == null)
-            {
+            if (!_reflectionCache[compName].TryGetValue(fieldName, out MemberWrapper wrapper) || !wrapper.IsValid)
                 return $"(Not found: {fieldName})";
-            }
+
+            if (!wrapper.CanRead)
+                return "(Not readable)";
 
             try
             {
-                object raw = accessor.Getter(comp);
-                return ConvertOrSkip(raw, accessor.MemberType);
+                object raw = (wrapper.Field != null)
+                    ? wrapper.Field.GetValue(comp)
+                    : wrapper.Property.GetValue(comp, null);
+
+                return ConvertOrSkip(raw, wrapper.MemberType);
             }
             catch (Exception ex)
             {
@@ -453,16 +466,14 @@ namespace SledTunerProject
             if (raw == null)
                 return null;
 
+            // Skip UnityEngine.Object types or complex types
             if (fieldType != null && typeof(UnityEngine.Object).IsAssignableFrom(fieldType))
                 return "(Skipped UnityEngine.Object)";
 
             if (fieldType != null && fieldType.IsEnum)
                 return raw;
 
-            if (fieldType != null && !fieldType.IsPrimitive &&
-                fieldType != typeof(string) &&
-                fieldType != typeof(decimal) &&
-                !fieldType.IsEnum)
+            if (fieldType != null && !fieldType.IsPrimitive && fieldType != typeof(string) && fieldType != typeof(decimal) && !fieldType.IsEnum)
             {
                 return "(Skipped complex type)";
             }
@@ -470,25 +481,28 @@ namespace SledTunerProject
             return raw;
         }
 
-        /// <summary>
-        /// Returns the GameObject component by name from the sled’s body.
-        /// </summary>
         private Component GetComponentByName(string compName)
         {
             if (_snowmobileBody == null)
                 return null;
 
             if (compName == "Rigidbody")
+            {
                 return _snowmobileBody.GetComponent<Rigidbody>();
+            }
             else if (compName == "Light")
             {
                 Transform t = _snowmobileBody.transform.Find("Spot Light");
-                return t != null ? t.GetComponent<Light>() : null;
+                if (t != null)
+                    return t.GetComponent<Light>();
+                return null;
             }
             else if (compName == "RagDollCollisionController" || compName == "RagDollManager")
             {
                 Transform ikPlayer = _snowmobileBody.transform.Find("IK Player (Drivers)");
-                return ikPlayer != null ? ikPlayer.GetComponent(compName) : null;
+                if (ikPlayer == null)
+                    return null;
+                return ikPlayer.GetComponent(compName);
             }
             else if (compName == "Shock")
             {
@@ -514,10 +528,6 @@ namespace SledTunerProject
             }
         }
 
-        /// <summary>
-        /// Uses the cached accessor delegate to apply (set) a field/property value on the component.
-        /// Special handling is provided for Light color channels.
-        /// </summary>
         private void ApplyField(string compName, string fieldName, object value)
         {
             Component comp = GetComponentByName(compName);
@@ -529,6 +539,7 @@ namespace SledTunerProject
             {
                 var lightComp = (Light)comp;
                 Color c = lightComp.color;
+
                 float floatVal = 0f;
                 if (value is double dVal)
                     floatVal = (float)dVal;
@@ -538,8 +549,10 @@ namespace SledTunerProject
                     floatVal = iVal;
                 else
                 {
-                    try { floatVal = Convert.ToSingle(value); } catch { }
+                    try { floatVal = Convert.ToSingle(value); }
+                    catch { }
                 }
+
                 switch (fieldName)
                 {
                     case "r":
@@ -555,21 +568,31 @@ namespace SledTunerProject
                         c.a = Mathf.Clamp01(floatVal);
                         break;
                 }
+
                 lightComp.color = c;
                 return;
             }
 
-            if (!_accessorCache.TryGetValue(compName, out var accessorDict) ||
-                !accessorDict.TryGetValue(fieldName, out FieldAccessor accessor) ||
-                accessor.Setter == null)
+            if (!_reflectionCache.TryGetValue(compName, out var memberDict) ||
+                !memberDict.TryGetValue(fieldName, out var wrapper) ||
+                !wrapper.IsValid)
             {
+                return;
+            }
+
+            if (!wrapper.CanWrite)
+            {
+                MelonLogger.Warning($"[SledTuner] {fieldName} in {compName} is read-only.");
                 return;
             }
 
             try
             {
-                object converted = ConvertValue(value, accessor.MemberType);
-                accessor.Setter(comp, converted);
+                object converted = ConvertValue(value, wrapper.MemberType);
+                if (wrapper.Field != null)
+                    wrapper.Field.SetValue(comp, converted);
+                else
+                    wrapper.Property.SetValue(comp, converted, null);
             }
             catch (Exception ex)
             {
@@ -600,64 +623,5 @@ namespace SledTunerProject
                 return raw;
             }
         }
-
-        #region Accessor Builder Helpers
-
-        /// <summary>
-        /// Creates a getter delegate for the given FieldInfo.
-        /// </summary>
-        private static Func<object, object> CreateGetter(FieldInfo field)
-        {
-            ParameterExpression instanceParam = Expression.Parameter(typeof(object), "instance");
-            Expression instanceCast = Expression.Convert(instanceParam, field.DeclaringType);
-            Expression fieldAccess = Expression.Field(instanceCast, field);
-            Expression castFieldValue = Expression.Convert(fieldAccess, typeof(object));
-            return Expression.Lambda<Func<object, object>>(castFieldValue, instanceParam).Compile();
-        }
-
-        /// <summary>
-        /// Creates a setter delegate for the given FieldInfo.
-        /// </summary>
-        private static Action<object, object> CreateSetter(FieldInfo field)
-        {
-            ParameterExpression instanceParam = Expression.Parameter(typeof(object), "instance");
-            ParameterExpression valueParam = Expression.Parameter(typeof(object), "value");
-            Expression instanceCast = Expression.Convert(instanceParam, field.DeclaringType);
-            Expression valueCast = Expression.Convert(valueParam, field.FieldType);
-            Expression fieldAccess = Expression.Field(instanceCast, field);
-            BinaryExpression assign = Expression.Assign(fieldAccess, valueCast);
-            return Expression.Lambda<Action<object, object>>(assign, instanceParam, valueParam).Compile();
-        }
-
-        /// <summary>
-        /// Creates a getter delegate for the given PropertyInfo.
-        /// </summary>
-        private static Func<object, object> CreateGetter(PropertyInfo property)
-        {
-            MethodInfo getter = property.GetGetMethod(true);
-            if (getter == null) return null;
-            ParameterExpression instanceParam = Expression.Parameter(typeof(object), "instance");
-            Expression instanceCast = Expression.Convert(instanceParam, property.DeclaringType);
-            Expression callGetter = Expression.Call(instanceCast, getter);
-            Expression castResult = Expression.Convert(callGetter, typeof(object));
-            return Expression.Lambda<Func<object, object>>(castResult, instanceParam).Compile();
-        }
-
-        /// <summary>
-        /// Creates a setter delegate for the given PropertyInfo.
-        /// </summary>
-        private static Action<object, object> CreateSetter(PropertyInfo property)
-        {
-            MethodInfo setter = property.GetSetMethod(true);
-            if (setter == null) return null;
-            ParameterExpression instanceParam = Expression.Parameter(typeof(object), "instance");
-            ParameterExpression valueParam = Expression.Parameter(typeof(object), "value");
-            Expression instanceCast = Expression.Convert(instanceParam, property.DeclaringType);
-            Expression valueCast = Expression.Convert(valueParam, property.PropertyType);
-            Expression callSetter = Expression.Call(instanceCast, setter, valueCast);
-            return Expression.Lambda<Action<object, object>>(callSetter, instanceParam, valueParam).Compile();
-        }
-
-        #endregion
     }
 }

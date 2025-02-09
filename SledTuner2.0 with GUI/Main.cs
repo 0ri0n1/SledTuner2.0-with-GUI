@@ -4,7 +4,7 @@ using UnityEngine.SceneManagement;
 using System.Collections.Generic;
 using HarmonyLib;
 
-[assembly: MelonInfo(typeof(SledTunerProject.Main), "SledTunerGUI", "1.0.0", "YourName")]
+[assembly: MelonInfo(typeof(SledTunerProject.Main), "SledTunerGUI", "3.0.0", "0B1KEN0BI")]
 [assembly: MelonGame("Hanki Games", "Sledders")]
 
 namespace SledTunerProject
