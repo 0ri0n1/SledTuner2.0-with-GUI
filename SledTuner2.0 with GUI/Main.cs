@@ -2,6 +2,7 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using System.Collections.Generic;
+using HarmonyLib;
 
 [assembly: MelonInfo(typeof(SledTunerProject.Main), "SledTunerGUI", "1.0.0", "YourName")]
 [assembly: MelonGame("Hanki Games", "Sledders")]
@@ -10,9 +11,13 @@ namespace SledTunerProject
 {
     public class Main : MelonMod
     {
+        // Managers for handling parameter inspection, configuration, and GUI.
         private SledParameterManager _sledParameterManager;
         private ConfigManager _configManager;
         private GUIManager _guiManager;
+
+        // Use the fully-qualified type to avoid conflicts with the Harmony namespace.
+        private HarmonyLib.Harmony _harmony;
 
         // Scenes considered “valid” for auto-initializing the sled.
         private readonly HashSet<string> _validScenes = new HashSet<string>
@@ -37,15 +42,22 @@ namespace SledTunerProject
         {
             MelonLogger.Msg("[SledTuner] OnInitializeMelon => Start setting up the mod...");
 
+            // Initialize Harmony and apply all patches in the assembly.
+            _harmony = new HarmonyLib.Harmony("your.unique.modid.sledtuner");
+            _harmony.PatchAll();
+            MelonLogger.Msg("[SledTuner] Harmony patches applied.");
+
             MelonLogger.Msg($"[SledTuner] Valid scenes: {string.Join(", ", _validScenes)}");
             MelonLogger.Msg($"[SledTuner] Invalid scenes: {string.Join(", ", _invalidScenes)}");
 
+            // Initialize the manager classes.
             _sledParameterManager = new SledParameterManager();
             _configManager = new ConfigManager(_sledParameterManager);
             _guiManager = new GUIManager(_sledParameterManager, _configManager);
 
             MelonLogger.Msg("[SledTuner] Mod setup complete. Will initialize sled after loading a valid scene or on F2/F3 press.");
 
+            // Subscribe to scene load events.
             SceneManager.sceneLoaded += OnSceneWasLoaded;
         }
 
@@ -95,6 +107,7 @@ namespace SledTunerProject
 
         public override void OnUpdate()
         {
+            // F2 toggles the GUI and attempts to initialize the sled if in a valid scene.
             if (Input.GetKeyDown(KeyCode.F2))
             {
                 MelonLogger.Msg("[SledTuner] F2 pressed => Toggling menu.");
@@ -112,6 +125,7 @@ namespace SledTunerProject
                 }
             }
 
+            // F3 forces re-initialization.
             if (Input.GetKeyDown(KeyCode.F3))
             {
                 MelonLogger.Msg("[SledTuner] F3 pressed => Forcing re-initialization.");
