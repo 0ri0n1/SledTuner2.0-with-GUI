@@ -15,12 +15,10 @@ namespace SledTunerProject
         private bool _menuOpen = false;
         private Rect _windowRect;
         private Vector2 _scrollPos = Vector2.zero;
-        // Field inputs: Component name -> (Field name -> string value)
         private Dictionary<string, Dictionary<string, string>> _fieldInputs = new Dictionary<string, Dictionary<string, string>>();
-        // Persistent foldout states for Advanced (Tree) view
         private Dictionary<string, bool> _foldoutStates = new Dictionary<string, bool>();
 
-        // === GUI STYLES (initialized lazily in OnGUI) ===
+        // === GUI STYLES ===
         private GUIStyle _windowStyle;
         private GUIStyle _labelStyle;
         private GUIStyle _textFieldStyle;
@@ -29,54 +27,51 @@ namespace SledTunerProject
         private GUIStyle _foldoutStyle;
         private GUIStyle _headerStyle;
 
-        // === ADDITIONAL FEATURES STATE ===
+        // === STATE ===
         private bool _manualApply = true;
         private bool _showHelp = false;
         private bool _advancedView = true;
         private bool _treeViewEnabled = true;
 
-        // === WINDOW CONTROLS & RESIZING ===
+        // === WINDOW / RESIZE ===
         private bool _isMinimized = false;
         private Rect _prevWindowRect;
         private bool _isResizing = false;
         private Vector2 _resizeStartMousePos;
         private Rect _resizeStartWindowRect;
         private ResizeEdges _resizeEdges;
-        private float _opacity = 1f; // 0 = transparent, 1 = opaque
+        private float _opacity = 1f;
 
         private struct ResizeEdges
         {
             public bool left, right, top, bottom;
         }
 
-        // === SIMPLE VIEW LOCAL PARAMETERS (non-reflection) ===
+        // === SIMPLE VIEW LOCAL PARAMS ===
         private float speed = 10f;
         private float gravity = -9.81f;
         private float power = 143000f;
         private float lugHeight = 0.18f;
         private float trackLength = 1f;
         private float pitchFactor = 7f;
-
         private bool notdriverInvincible = true;
         private bool test = false;
         private bool apply = false;
 
-        // Original values for Reset (for Simple View)
         private float originalPower = 143000f;
         private float originalLugHeight = 0.18f;
         private float originalTrackLength = 1f;
         private float originalGravity = -9.81f;
         private float originalPitchFactor = 7f;
 
-        // === COLOR PREVIEW TEXTURE ===
         private Texture2D _colorPreviewTexture;
 
-        // === HOLD-TIME DICTIONARIES for +/- repeat buttons ===
-        // Key format: e.g. "simple.speed.minus" or "Light.r.plus"
-        private Dictionary<string, float> _holdTimesMinus = new Dictionary<string, float>();
-        private Dictionary<string, float> _holdTimesPlus = new Dictionary<string, float>();
+        // NEW: Track hold states, but we only apply increments on Repaint
+        private Dictionary<string, bool> _pressingMinus = new Dictionary<string, bool>();
+        private Dictionary<string, bool> _pressingPlus = new Dictionary<string, bool>();
+        private Dictionary<string, float> _holdTimeMinus = new Dictionary<string, float>();
+        private Dictionary<string, float> _holdTimePlus = new Dictionary<string, float>();
 
-        // === CONSTRUCTOR ===
         public GUIManager(SledParameterManager sledParameterManager, ConfigManager configManager)
         {
             _sledParameterManager = sledParameterManager;
@@ -84,15 +79,8 @@ namespace SledTunerProject
             _windowRect = new Rect(Screen.width * 0.2f, Screen.height * 0.2f,
                                    Screen.width * 0.6f, Screen.height * 0.6f);
             _resizeEdges = new ResizeEdges();
-            _advancedView = true;
-            _treeViewEnabled = true;
         }
 
-        // === PUBLIC METHODS ===
-
-        /// <summary>
-        /// Toggles the GUI menu. On open, repopulate fields.
-        /// </summary>
         public void ToggleMenu()
         {
             _menuOpen = !_menuOpen;
@@ -107,9 +95,6 @@ namespace SledTunerProject
             }
         }
 
-        /// <summary>
-        /// Refresh the field inputs from SledParameterManager for both Simple & Advanced views.
-        /// </summary>
         public void RePopulateFields()
         {
             _fieldInputs.Clear();
@@ -125,7 +110,7 @@ namespace SledTunerProject
                     _fieldInputs[compName][field] = (val != null) ? val.ToString() : "(No data)";
                 }
             }
-            // Ensure foldout states exist for each component
+
             foreach (var comp in _fieldInputs.Keys)
             {
                 if (!_foldoutStates.ContainsKey(comp))
@@ -134,15 +119,10 @@ namespace SledTunerProject
             MelonLogger.Msg("[GUIManager] Fields repopulated.");
         }
 
-        /// <summary>
-        /// Main entry point for rendering the GUI window each frame.
-        /// </summary>
         public void DrawMenu()
         {
-            if (!_menuOpen)
-                return;
+            if (!_menuOpen) return;
 
-            // Lazy init GUI styles
             if (_windowStyle == null)
             {
                 _windowStyle = new GUIStyle(GUI.skin.window);
@@ -154,18 +134,20 @@ namespace SledTunerProject
                 _headerStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 14 };
             }
 
-            // Apply opacity
             Color prevColor = GUI.color;
             GUI.color = new Color(prevColor.r, prevColor.g, prevColor.b, _opacity);
 
-            // Draw the window
             _windowRect = GUILayout.Window(1234, _windowRect, WindowFunction, "SledTuner Menu", _windowStyle);
+
+            // IMPORTANT: Only apply increments once, e.g. on EventType.Repaint
+            if (Event.current.type == EventType.Repaint)
+            {
+                UpdateHeldButtons();
+            }
 
             GUI.color = prevColor;
             HandleResize();
         }
-
-        // === PRIVATE DRAW METHODS ===
 
         private void WindowFunction(int windowID)
         {
@@ -180,11 +162,131 @@ namespace SledTunerProject
             GUILayout.Space(5);
 
             if (_advancedView)
+            {
                 DrawAdvancedTunerMenu();
+            }
             else
+            {
                 DrawSimpleTunerMenu();
+            }
 
             GUI.DragWindow(new Rect(0, 0, 10000, 20));
+        }
+
+        // NEW: This method updates increments on Repaint
+        private void UpdateHeldButtons()
+        {
+            float dt = Time.deltaTime;
+
+            // minus
+            foreach (var kvp in _pressingMinus)
+            {
+                string key = kvp.Key; // e.g. "simple.speed.minus"
+                bool isHeld = kvp.Value;
+                if (!isHeld)
+                {
+                    _holdTimeMinus[key] = 0f;
+                    continue;
+                }
+
+                // It's held. Do acceleration
+                if (!_holdTimeMinus.ContainsKey(key))
+                    _holdTimeMinus[key] = 0f;
+                _holdTimeMinus[key] += dt;
+
+                // key might be "compName.fieldName.minus"
+                float baseStep = 0.01f;
+                float holdTime = _holdTimeMinus[key];
+                float dynamicStep = baseStep + (0.05f * holdTime);
+                if (dynamicStep > 0.5f) dynamicStep = 0.5f;
+
+                // Now parse out the actual comp/field
+                string noSuffix = key.Replace(".minus", "");
+                string[] parts = noSuffix.Split('.');
+                if (parts.Length < 2) continue;
+
+                string compName = parts[0];
+                string fieldName = parts[1];
+                // If it's "simple.speed", handle local variable
+                if (compName == "simple")
+                {
+                    switch (fieldName)
+                    {
+                        case "speed": speed = Mathf.Max(speed - (dynamicStep * dt), 0f); break;
+                        case "gravity": gravity = gravity - (dynamicStep * dt); break;
+                        case "power": power = Mathf.Max(power - (dynamicStep * dt), 0f); break;
+                        case "lugHeight": lugHeight = Mathf.Max(lugHeight - (dynamicStep * dt), 0f); break;
+                        case "trackLength": trackLength = Mathf.Max(trackLength - (dynamicStep * dt), 0.1f); break;
+                        case "pitchFactor": pitchFactor = Mathf.Max(pitchFactor - (dynamicStep * dt), 0.1f); break;
+                    }
+                }
+                else
+                {
+                    // Reflection-based field
+                    double oldVal;
+                    double.TryParse(_fieldInputs[compName][fieldName], out oldVal);
+                    double newVal = oldVal - (dynamicStep * dt);
+                    // clamp?
+                    float min = _sledParameterManager.GetSliderMin(compName, fieldName);
+                    if (newVal < min) newVal = min;
+                    _fieldInputs[compName][fieldName] = newVal.ToString("F2");
+                    _sledParameterManager.SetFieldValue(compName, fieldName, newVal);
+                    if (!_manualApply)
+                        _sledParameterManager.ApplyParameters();
+                }
+            }
+
+            // plus
+            foreach (var kvp in _pressingPlus)
+            {
+                string key = kvp.Key;
+                bool isHeld = kvp.Value;
+                if (!isHeld)
+                {
+                    _holdTimePlus[key] = 0f;
+                    continue;
+                }
+
+                if (!_holdTimePlus.ContainsKey(key))
+                    _holdTimePlus[key] = 0f;
+                _holdTimePlus[key] += dt;
+
+                float baseStep = 0.01f;
+                float holdTime = _holdTimePlus[key];
+                float dynamicStep = baseStep + (0.05f * holdTime);
+                if (dynamicStep > 0.5f) dynamicStep = 0.5f;
+
+                string noSuffix = key.Replace(".plus", "");
+                string[] parts = noSuffix.Split('.');
+                if (parts.Length < 2) continue;
+
+                string compName = parts[0];
+                string fieldName = parts[1];
+                if (compName == "simple")
+                {
+                    switch (fieldName)
+                    {
+                        case "speed": speed = Mathf.Min(speed + (dynamicStep * dt), 999999f); break;
+                        case "gravity": gravity = gravity + (dynamicStep * dt); break;
+                        case "power": power = Mathf.Min(power + (dynamicStep * dt), 999999f); break;
+                        case "lugHeight": lugHeight = Mathf.Min(lugHeight + (dynamicStep * dt), 999f); break;
+                        case "trackLength": trackLength = Mathf.Min(trackLength + (dynamicStep * dt), 999f); break;
+                        case "pitchFactor": pitchFactor = Mathf.Min(pitchFactor + (dynamicStep * dt), 999f); break;
+                    }
+                }
+                else
+                {
+                    double oldVal;
+                    double.TryParse(_fieldInputs[compName][fieldName], out oldVal);
+                    double newVal = oldVal + (dynamicStep * dt);
+                    float max = _sledParameterManager.GetSliderMax(compName, fieldName);
+                    if (newVal > max) newVal = max;
+                    _fieldInputs[compName][fieldName] = newVal.ToString("F2");
+                    _sledParameterManager.SetFieldValue(compName, fieldName, newVal);
+                    if (!_manualApply)
+                        _sledParameterManager.ApplyParameters();
+                }
+            }
         }
 
         private void DrawTitleBar()
@@ -250,32 +352,29 @@ namespace SledTunerProject
             GUILayout.EndHorizontal();
             GUILayout.Space(10);
 
-            // Local parameters
             GUILayout.Label("FlySpeed");
-            speed = FloatFieldWithSlider("simple.speed", speed, 0f, 200f, 0.01f);
+            speed = DrawRepeatSlider("simple.speed", speed, 0f, 200f);
 
             GUILayout.Label("Gravity");
-            gravity = FloatFieldWithSlider("simple.gravity", gravity, -10f, 10f, 0.01f);
+            gravity = DrawRepeatSlider("simple.gravity", gravity, -10f, 10f);
 
             GUILayout.Label("Power");
-            power = FloatFieldWithSlider("simple.power", power, 0f, 300000f, 0.01f);
+            power = DrawRepeatSlider("simple.power", power, 0f, 300000f);
 
             GUILayout.Label("Lug Height");
-            lugHeight = FloatFieldWithSlider("simple.lugHeight", lugHeight, 0f, 2f, 0.01f);
+            lugHeight = DrawRepeatSlider("simple.lugHeight", lugHeight, 0f, 2f);
 
             GUILayout.Label("Track Length");
-            trackLength = FloatFieldWithSlider("simple.trackLength", trackLength, 0.5f, 2f, 0.01f);
+            trackLength = DrawRepeatSlider("simple.trackLength", trackLength, 0.5f, 2f);
 
             GUILayout.Label("Pitch Factor");
-            pitchFactor = FloatFieldWithSlider("simple.pitchFactor", pitchFactor, 2f, 30f, 0.01f);
+            pitchFactor = DrawRepeatSlider("simple.pitchFactor", pitchFactor, 2f, 30f);
 
-            // Light color
             GUILayout.Space(10);
             GUILayout.Label("Headlight Color (RGBA)");
-
             if (_fieldInputs.ContainsKey("Light"))
             {
-                DrawColorFieldsFromReflection("Light", _fieldInputs["Light"]);
+                DrawColorReflectionWithHold("Light", _fieldInputs["Light"]);
             }
             else
             {
@@ -285,11 +384,10 @@ namespace SledTunerProject
             float rVal = 1f, gVal = 1f, bVal = 1f, aVal = 1f;
             if (_fieldInputs.ContainsKey("Light"))
             {
-                string tempStr;
-                if (_fieldInputs["Light"].TryGetValue("r", out tempStr)) float.TryParse(tempStr, out rVal);
-                if (_fieldInputs["Light"].TryGetValue("g", out tempStr)) float.TryParse(tempStr, out gVal);
-                if (_fieldInputs["Light"].TryGetValue("b", out tempStr)) float.TryParse(tempStr, out bVal);
-                if (_fieldInputs["Light"].TryGetValue("a", out tempStr)) float.TryParse(tempStr, out aVal);
+                if (_fieldInputs["Light"].TryGetValue("r", out string tmp)) float.TryParse(tmp, out rVal);
+                if (_fieldInputs["Light"].TryGetValue("g", out tmp)) float.TryParse(tmp, out gVal);
+                if (_fieldInputs["Light"].TryGetValue("b", out tmp)) float.TryParse(tmp, out bVal);
+                if (_fieldInputs["Light"].TryGetValue("a", out tmp)) float.TryParse(tmp, out aVal);
             }
             Color currentColor = new Color(rVal, gVal, bVal, aVal);
             GUILayout.Label("Color Preview:");
@@ -305,153 +403,65 @@ namespace SledTunerProject
             GUILayout.EndVertical();
         }
 
-        /// <summary>
-        /// Replaces +/- with RepeatButtons that accelerate as user holds down.
-        /// </summary>
-        private float FloatFieldWithSlider(string uniqueKey, float currentVal, float min, float max, float baseStep)
+        // NEW: "DrawRepeatSlider" just draws a normal slider + text, but we store minus/plus press states.
+        private float DrawRepeatSlider(string uniqueKey, float currentVal, float min, float max)
         {
-            float newVal = GUILayout.HorizontalSlider(currentVal, min, max, GUILayout.Width(150));
-            string textVal = GUILayout.TextField(newVal.ToString("F2"), GUILayout.Width(50));
+            float val = GUILayout.HorizontalSlider(currentVal, min, max, GUILayout.Width(150));
+            string textVal = GUILayout.TextField(val.ToString("F2"), GUILayout.Width(50));
             if (float.TryParse(textVal, out float parsed))
-                newVal = parsed;
+                val = parsed;
 
             GUILayout.BeginHorizontal(GUILayout.Width(60));
 
-            // minus RepeatButton
             string minusKey = uniqueKey + ".minus";
-            if (GUILayout.RepeatButton("-", _buttonStyle, GUILayout.Width(25)))
-            {
-                float dt = Time.deltaTime;
-                if (!_holdTimesMinus.ContainsKey(minusKey))
-                    _holdTimesMinus[minusKey] = 0f;
-
-                _holdTimesMinus[minusKey] += dt;
-
-                float holdTime = _holdTimesMinus[minusKey];
-                // accelerate step from baseStep up to max 0.5
-                float dynamicStep = baseStep + (0.05f * holdTime);
-                if (dynamicStep > 0.5f) dynamicStep = 0.5f;
-
-                // apply once per frame
-                newVal = Mathf.Max(min, newVal - (dynamicStep * dt));
-            }
-            else
-            {
-                _holdTimesMinus[minusKey] = 0f;
-            }
-
-            // plus RepeatButton
             string plusKey = uniqueKey + ".plus";
-            if (GUILayout.RepeatButton("+", _buttonStyle, GUILayout.Width(25)))
-            {
-                float dt = Time.deltaTime;
-                if (!_holdTimesPlus.ContainsKey(plusKey))
-                    _holdTimesPlus[plusKey] = 0f;
 
-                _holdTimesPlus[plusKey] += dt;
+            // Instead of changing the value immediately, we store isHeld in a dictionary:
+            bool pressingMinus = GUILayout.RepeatButton("-", _buttonStyle, GUILayout.Width(25));
+            bool pressingPlus = GUILayout.RepeatButton("+", _buttonStyle, GUILayout.Width(25));
 
-                float holdTime = _holdTimesPlus[plusKey];
-                float dynamicStep = baseStep + (0.05f * holdTime);
-                if (dynamicStep > 0.5f) dynamicStep = 0.5f;
-
-                newVal = Mathf.Min(max, newVal + (dynamicStep * dt));
-            }
-            else
-            {
-                _holdTimesPlus[plusKey] = 0f;
-            }
+            _pressingMinus[minusKey] = pressingMinus;
+            _pressingPlus[plusKey] = pressingPlus;
 
             GUILayout.EndHorizontal();
-            return newVal;
+            return val;
         }
 
-        /// <summary>
-        /// Draw the color fields for Light (both Simple & Advanced). 
-        /// Now uses click-and-hold repeat buttons with acceleration.
-        /// </summary>
-        private void DrawColorFieldsFromReflection(string compName, Dictionary<string, string> lightFields)
+        // NEW: Similar approach for Light color channels in SimpleTuner
+        private void DrawColorReflectionWithHold(string compName, Dictionary<string, string> lightFields)
         {
             string[] channels = { "r", "g", "b", "a" };
             foreach (string channel in channels)
             {
-                if (!lightFields.ContainsKey(channel))
-                    continue;
+                if (!lightFields.ContainsKey(channel)) continue;
 
-                if (!float.TryParse(lightFields[channel], out float currentVal))
-                    currentVal = 0f;
-
-                float sliderMin = 0f;
-                float sliderMax = 1f;
-                string channelLabel;
-                switch (channel)
-                {
-                    case "r": channelLabel = "Red"; break;
-                    case "g": channelLabel = "Green"; break;
-                    case "b": channelLabel = "Blue"; break;
-                    case "a": channelLabel = "Alpha"; break;
-                    default: channelLabel = channel; break;
-                }
-
-                GUILayout.BeginHorizontal();
-                GUILayout.Label(channelLabel + ":", _labelStyle, GUILayout.Width(40));
-
-                float newVal = GUILayout.HorizontalSlider(currentVal, sliderMin, sliderMax, GUILayout.Width(150));
-                string textVal = GUILayout.TextField(newVal.ToString("F2"), _textFieldStyle, GUILayout.Width(40));
+                float currentVal = 0f;
+                float.TryParse(lightFields[channel], out currentVal);
+                float newVal = GUILayout.HorizontalSlider(currentVal, 0f, 1f, GUILayout.Width(150));
+                string textVal = GUILayout.TextField(newVal.ToString("F2"), GUILayout.Width(40));
                 if (float.TryParse(textVal, out float parsedVal))
                     newVal = parsedVal;
 
-                // minus
+                GUILayout.BeginHorizontal(GUILayout.Width(60));
                 string minusKey = compName + "." + channel + ".minus";
-                if (GUILayout.RepeatButton("-", _buttonStyle, GUILayout.Width(25)))
-                {
-                    float dt = Time.deltaTime;
-                    if (!_holdTimesMinus.ContainsKey(minusKey))
-                        _holdTimesMinus[minusKey] = 0f;
-
-                    _holdTimesMinus[minusKey] += dt;
-
-                    float holdTime = _holdTimesMinus[minusKey];
-                    float dynamicStep = 0.01f + (0.05f * holdTime);
-                    if (dynamicStep > 0.5f) dynamicStep = 0.5f;
-
-                    newVal = Mathf.Max(sliderMin, newVal - (dynamicStep * dt));
-                }
-                else
-                {
-                    _holdTimesMinus[minusKey] = 0f;
-                }
-
-                // plus
                 string plusKey = compName + "." + channel + ".plus";
-                if (GUILayout.RepeatButton("+", _buttonStyle, GUILayout.Width(25)))
-                {
-                    float dt = Time.deltaTime;
-                    if (!_holdTimesPlus.ContainsKey(plusKey))
-                        _holdTimesPlus[plusKey] = 0f;
 
-                    _holdTimesPlus[plusKey] += dt;
+                bool pressingMinus = GUILayout.RepeatButton("-", _buttonStyle, GUILayout.Width(25));
+                bool pressingPlus = GUILayout.RepeatButton("+", _buttonStyle, GUILayout.Width(25));
 
-                    float holdTime = _holdTimesPlus[plusKey];
-                    float dynamicStep = 0.01f + (0.05f * holdTime);
-                    if (dynamicStep > 0.5f) dynamicStep = 0.5f;
+                _pressingMinus[minusKey] = pressingMinus;
+                _pressingPlus[plusKey] = pressingPlus;
 
-                    newVal = Mathf.Min(sliderMax, newVal + (dynamicStep * dt));
-                }
-                else
-                {
-                    _holdTimesPlus[plusKey] = 0f;
-                }
+                GUILayout.EndHorizontal();
 
-                // If changed
                 if (Mathf.Abs(newVal - currentVal) > 0.0001f)
                 {
                     lightFields[channel] = newVal.ToString("F2");
                     _sledParameterManager.SetFieldValue(compName, channel, newVal);
-
                     if (!_manualApply)
                         _sledParameterManager.ApplyParameters();
                 }
-                GUILayout.EndHorizontal();
+                GUILayout.Space(5);
             }
         }
 
@@ -475,7 +485,6 @@ namespace SledTunerProject
                     UpdateColorPreviewTexture(previewColor);
                     GUILayout.Box(_colorPreviewTexture, GUILayout.Width(30), GUILayout.Height(30));
                 }
-
                 GUILayout.Space(10);
             }
         }
@@ -517,6 +526,7 @@ namespace SledTunerProject
         {
             foreach (var field in fields)
             {
+                // skip Light color in this function
                 if (compName == "Light" && (field.Key == "r" || field.Key == "g" || field.Key == "b" || field.Key == "a"))
                     continue;
 
@@ -525,65 +535,27 @@ namespace SledTunerProject
                 Type fieldType = _sledParameterManager.GetFieldType(compName, field.Key);
 
                 string fieldStringVal = field.Value;
-
                 if (fieldType == typeof(float) || fieldType == typeof(int) || fieldType == typeof(double))
                 {
-                    double currentVal = 0.0;
-                    double.TryParse(fieldStringVal, out currentVal);
-
+                    double.TryParse(fieldStringVal, out double currentVal);
                     float sliderMin = _sledParameterManager.GetSliderMin(compName, field.Key);
                     float sliderMax = _sledParameterManager.GetSliderMax(compName, field.Key);
-                    double baseStep = (fieldType == typeof(int)) ? 1.0 : 0.01;
 
+                    // We'll do a normal slider + text for immediate updates, but store the minus/plus as pressed booleans
                     float newValFloat = GUILayout.HorizontalSlider((float)currentVal, sliderMin, sliderMax, GUILayout.Width(150));
                     string newText = GUILayout.TextField(newValFloat.ToString("F2"), _textFieldStyle, GUILayout.Width(50));
                     if (float.TryParse(newText, out float parsedVal))
                         newValFloat = parsedVal;
 
-                    GUILayout.BeginHorizontal(GUILayout.Width(60));
-
-                    // minus
+                    double baseStep = (fieldType == typeof(int)) ? 1.0 : 0.01;
                     string minusKey = compName + "." + field.Key + ".minus";
-                    if (GUILayout.RepeatButton("-", _buttonStyle, GUILayout.Width(25)))
-                    {
-                        float dt = Time.deltaTime;
-                        if (!_holdTimesMinus.ContainsKey(minusKey))
-                            _holdTimesMinus[minusKey] = 0f;
-
-                        _holdTimesMinus[minusKey] += dt;
-
-                        float holdTime = _holdTimesMinus[minusKey];
-                        double dynamicStep = baseStep + (0.05 * holdTime);
-                        if (dynamicStep > 0.5) dynamicStep = 0.5;
-
-                        newValFloat = Mathf.Max(sliderMin, newValFloat - (float)(dynamicStep * dt));
-                    }
-                    else
-                    {
-                        _holdTimesMinus[minusKey] = 0f;
-                    }
-
-                    // plus
                     string plusKey = compName + "." + field.Key + ".plus";
-                    if (GUILayout.RepeatButton("+", _buttonStyle, GUILayout.Width(25)))
-                    {
-                        float dt = Time.deltaTime;
-                        if (!_holdTimesPlus.ContainsKey(plusKey))
-                            _holdTimesPlus[plusKey] = 0f;
 
-                        _holdTimesPlus[plusKey] += dt;
-
-                        float holdTime = _holdTimesPlus[plusKey];
-                        double dynamicStep = baseStep + (0.05 * holdTime);
-                        if (dynamicStep > 0.5) dynamicStep = 0.5;
-
-                        newValFloat = Mathf.Min(sliderMax, newValFloat + (float)(dynamicStep * dt));
-                    }
-                    else
-                    {
-                        _holdTimesPlus[plusKey] = 0f;
-                    }
-
+                    GUILayout.BeginHorizontal(GUILayout.Width(60));
+                    bool pressingMinus = GUILayout.RepeatButton("-", _buttonStyle, GUILayout.Width(25));
+                    bool pressingPlus = GUILayout.RepeatButton("+", _buttonStyle, GUILayout.Width(25));
+                    _pressingMinus[minusKey] = pressingMinus;
+                    _pressingPlus[plusKey] = pressingPlus;
                     GUILayout.EndHorizontal();
 
                     double finalVal = (double)newValFloat;
@@ -626,7 +598,7 @@ namespace SledTunerProject
                 GUILayout.EndHorizontal();
             }
 
-            if (compName == "Light" && fields != null)
+            if (compName == "Light")
             {
                 DrawColorFieldsFromReflection(compName, fields);
             }
@@ -704,39 +676,35 @@ namespace SledTunerProject
         {
             if (targetType == typeof(float))
             {
-                if (float.TryParse(input, out float f))
-                    return f;
+                if (float.TryParse(input, out float f)) return f;
                 return 0f;
             }
-            else if (targetType == typeof(int))
+            if (targetType == typeof(int))
             {
-                if (int.TryParse(input, out int i))
-                    return i;
+                if (int.TryParse(input, out int i)) return i;
                 return 0;
             }
-            else if (targetType == typeof(bool))
+            if (targetType == typeof(bool))
             {
-                if (bool.TryParse(input, out bool b))
-                    return b;
+                if (bool.TryParse(input, out bool b)) return b;
                 return false;
             }
-            else if (targetType == typeof(double))
+            if (targetType == typeof(double))
             {
-                if (double.TryParse(input, out double d))
-                    return d;
+                if (double.TryParse(input, out double d)) return d;
                 return 0.0;
             }
-            else if (targetType == typeof(Vector2))
+            if (targetType == typeof(Vector2))
             {
                 if (TryParseVector2(input, out Vector2 v2)) return v2;
                 return Vector2.zero;
             }
-            else if (targetType == typeof(Vector3))
+            if (targetType == typeof(Vector3))
             {
                 if (TryParseVector3(input, out Vector3 v3)) return v3;
                 return Vector3.zero;
             }
-            else if (targetType == typeof(Vector4))
+            if (targetType == typeof(Vector4))
             {
                 if (TryParseVector4(input, out Vector4 v4)) return v4;
                 return Vector4.zero;
@@ -757,14 +725,14 @@ namespace SledTunerProject
             test = false;
         }
 
-        // === HELPER PARSING FOR VECTORS ===
         private bool TryParseVector2(string input, out Vector2 vector)
         {
             vector = Vector2.zero;
             if (string.IsNullOrEmpty(input)) return false;
             string[] parts = input.Split(',');
             if (parts.Length != 2) return false;
-            if (float.TryParse(parts[0], out float x) && float.TryParse(parts[1], out float y))
+            if (float.TryParse(parts[0], out float x) &&
+                float.TryParse(parts[1], out float y))
             {
                 vector = new Vector2(x, y);
                 return true;
@@ -867,7 +835,7 @@ namespace SledTunerProject
             if (!_isMinimized)
             {
                 _prevWindowRect = _windowRect;
-                _windowRect = new Rect(Screen.width - 150f - 10f, 10f, 150f, 30f);
+                _windowRect = new Rect(Screen.width - 160f, 10f, 150f, 30f);
                 _isMinimized = true;
                 MelonLogger.Msg("[GUIManager] Window minimized.");
             }
@@ -927,6 +895,42 @@ namespace SledTunerProject
                 pixels[i] = color;
             _colorPreviewTexture.SetPixels(pixels);
             _colorPreviewTexture.Apply();
+        }
+        private void DrawColorFieldsFromReflection(string compName, Dictionary<string, string> fields)
+        {
+            string[] channels = { "r", "g", "b", "a" };
+            foreach (string channel in channels)
+            {
+                if (!fields.ContainsKey(channel)) continue;
+
+                float currentVal = 0f;
+                float.TryParse(fields[channel], out currentVal);
+                float newVal = GUILayout.HorizontalSlider(currentVal, 0f, 1f, GUILayout.Width(150));
+                string textVal = GUILayout.TextField(newVal.ToString("F2"), GUILayout.Width(40));
+                if (float.TryParse(textVal, out float parsedVal))
+                    newVal = parsedVal;
+
+                GUILayout.BeginHorizontal(GUILayout.Width(60));
+                string minusKey = compName + "." + channel + ".minus";
+                string plusKey = compName + "." + channel + ".plus";
+
+                bool pressingMinus = GUILayout.RepeatButton("-", _buttonStyle, GUILayout.Width(25));
+                bool pressingPlus = GUILayout.RepeatButton("+", _buttonStyle, GUILayout.Width(25));
+
+                _pressingMinus[minusKey] = pressingMinus;
+                _pressingPlus[plusKey] = pressingPlus;
+
+                GUILayout.EndHorizontal();
+
+                if (Mathf.Abs(newVal - currentVal) > 0.0001f)
+                {
+                    fields[channel] = newVal.ToString("F2");
+                    _sledParameterManager.SetFieldValue(compName, channel, newVal);
+                    if (!_manualApply)
+                        _sledParameterManager.ApplyParameters();
+                }
+                GUILayout.Space(5);
+            }
         }
     }
 }
