@@ -75,7 +75,7 @@ namespace SledTunerProject
 
         // === LOCAL PREVIEW FOR REFLECTION FIELDS (ADVANCED) ===
         // For numeric fields, we store the "live" double in _fieldPreview[compName][fieldName].
-        // Only on button release or "Apply" do we commit to SledParameterManager.
+        // Only on button release or 'Apply' do we commit to SledParameterManager.
         private Dictionary<string, Dictionary<string, double>> _fieldPreview = new Dictionary<string, Dictionary<string, double>>();
 
         // For minus/plus detection in reflection-based fields:
@@ -84,7 +84,9 @@ namespace SledTunerProject
         private HashSet<string> _plusHeldNow = new HashSet<string>();
         private HashSet<string> _plusHeldPrev = new HashSet<string>();
 
-        // === DEBOUNCE / THROTTLE VARIABLES ===
+        // === DEBOUNCE / THROTTLE VARIABLES (if needed) ===
+        // (The debounce code remains here from the previous version, though your testing
+        // suggests that the layout update is the main issue. We keep it here in case further tuning is required.)
         private bool _pendingCommit = false;
         private float _lastCommitTime = 0f;
         private const float _commitDelay = 0.2f; // 200 milliseconds
@@ -560,9 +562,46 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Reflection-based advanced parameters in a flat list. 
-        /// We'll skip color channels in the normal numeric loop below 
-        /// and call DrawColorChannelsCommon for 'Light'.
+        /// Helper method to draw numeric fields using a style similar to the Light color channels.
+        /// </summary>
+        private void DrawNumericField(string compName, string fieldName, double currentVal, float sliderMin, float sliderMax, double step)
+        {
+            GUILayout.BeginHorizontal();
+            // Use a moderately sized label (adjust width as needed)
+            GUILayout.Label(fieldName + ":", _labelStyle, GUILayout.Width(100));
+            float sliderVal = GUILayout.HorizontalSlider((float)currentVal, sliderMin, sliderMax, GUILayout.Width(150));
+            string textVal = GUILayout.TextField(sliderVal.ToString("F2"), _textFieldStyle, GUILayout.Width(40));
+            if (float.TryParse(textVal, out float parsedVal))
+                sliderVal = parsedVal;
+            // +/- buttons
+            string minusKey = compName + "." + fieldName + ".minus";
+            bool minusHeld = GUILayout.RepeatButton("-", _buttonStyle, GUILayout.Width(25));
+            if (minusHeld)
+                _minusHeldNow.Add(minusKey);
+            string plusKey = compName + "." + fieldName + ".plus";
+            bool plusHeld = GUILayout.RepeatButton("+", _buttonStyle, GUILayout.Width(25));
+            if (plusHeld)
+                _plusHeldNow.Add(plusKey);
+            GUILayout.EndHorizontal();
+
+            float newVal = sliderVal;
+            if (Event.current.type == EventType.Repaint)
+            {
+                if (_minusHeldNow.Contains(minusKey))
+                    newVal = Mathf.Max(sliderMin, newVal - (float)step);
+                if (_plusHeldNow.Contains(plusKey))
+                    newVal = Mathf.Min(sliderMax, newVal + (float)step);
+            }
+            if (Math.Abs(newVal - currentVal) > 0.0001)
+            {
+                _fieldPreview[compName][fieldName] = newVal;
+                _fieldInputs[compName][fieldName] = newVal.ToString("F2");
+            }
+        }
+
+        /// <summary>
+        /// Reflection-based advanced parameters in a flat list.
+        /// We'll skip color channels in the normal numeric loop below and call DrawColorChannelsCommon for 'Light'.
         /// </summary>
         private void DrawAdvancedFlatParameters()
         {
@@ -642,10 +681,9 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Reflection-based numeric/bool fields. 
-        /// For color channels, we skip them here and call DrawColorChannelsCommon. 
-        /// For numeric fields, we store local changes in _fieldPreview. 
-        /// Only on button release or 'Apply' do we commit to SledParameterManager.
+        /// Reflection-based numeric/bool fields.
+        /// For color channels, we skip them here and call DrawColorChannelsCommon.
+        /// For numeric fields, we now call DrawNumericField so that their layout and update behavior match that of Light.
         /// </summary>
         private void DrawReflectionParameters(string compName, Dictionary<string, string> fields)
         {
@@ -660,7 +698,7 @@ namespace SledTunerProject
                 }
 
                 GUILayout.BeginHorizontal();
-                GUILayout.Label(fieldName + ":", _labelStyle, GUILayout.Width(150));
+                GUILayout.Label(fieldName + ":", _labelStyle, GUILayout.Width(100));
 
                 Type fieldType = _sledParameterManager.GetFieldType(compName, fieldName);
                 double currentVal = _fieldPreview[compName][fieldName]; // numeric preview
@@ -669,53 +707,9 @@ namespace SledTunerProject
                 {
                     float sliderMin = _sledParameterManager.GetSliderMin(compName, fieldName);
                     float sliderMax = _sledParameterManager.GetSliderMax(compName, fieldName);
-
                     double step = (fieldType == typeof(int)) ? 1.0 : 0.01;
-
-                    // draw slider
-                    float sliderVal = GUILayout.HorizontalSlider(
-                        (float)currentVal, sliderMin, sliderMax, GUILayout.Width(150)
-                    );
-
-                    // user text
-                    string newText = GUILayout.TextField(
-                        sliderVal.ToString("F2"),
-                        _textFieldStyle,
-                        GUILayout.Width(50)
-                    );
-                    if (float.TryParse(newText, out float parsedVal))
-                    {
-                        sliderVal = parsedVal;
-                    }
-
-                    // +/- repeat
-                    GUILayout.BeginHorizontal(GUILayout.Width(60));
-                    string minusKey = compName + "." + fieldName + ".minus";
-                    bool minusHeld = GUILayout.RepeatButton("-", _buttonStyle, GUILayout.Width(25));
-                    if (minusHeld)
-                        _minusHeldNow.Add(minusKey);
-
-                    string plusKey = compName + "." + fieldName + ".plus";
-                    bool plusHeld = GUILayout.RepeatButton("+", _buttonStyle, GUILayout.Width(25));
-                    if (plusHeld)
-                        _plusHeldNow.Add(plusKey);
-                    GUILayout.EndHorizontal();
-
-                    double finalVal = (double)sliderVal;
-
-                    if (Event.current.type == EventType.Repaint)
-                    {
-                        if (_minusHeldNow.Contains(minusKey))
-                            finalVal = Math.Max(sliderMin, finalVal - step);
-                        if (_plusHeldNow.Contains(plusKey))
-                            finalVal = Math.Min(sliderMax, finalVal + step);
-                    }
-
-                    if (Math.Abs(finalVal - currentVal) > 0.0001)
-                    {
-                        _fieldPreview[compName][fieldName] = finalVal;
-                        _fieldInputs[compName][fieldName] = finalVal.ToString("F2");
-                    }
+                    GUILayout.EndHorizontal(); // End the current horizontal group before calling our helper
+                    DrawNumericField(compName, fieldName, currentVal, sliderMin, sliderMax, step);
                 }
                 else if (fieldType == typeof(bool))
                 {
@@ -733,6 +727,7 @@ namespace SledTunerProject
                             _sledParameterManager.ApplyParameters();
                         }
                     }
+                    GUILayout.EndHorizontal();
                 }
                 else
                 {
@@ -746,9 +741,8 @@ namespace SledTunerProject
                     {
                         _fieldInputs[compName][fieldName] = newVal;
                     }
+                    GUILayout.EndHorizontal();
                 }
-
-                GUILayout.EndHorizontal();
             }
         }
 
@@ -984,6 +978,92 @@ namespace SledTunerProject
                 pixels[i] = color;
             _colorPreviewTexture.SetPixels(pixels);
             _colorPreviewTexture.Apply();
+        }
+        public static class Vector3FieldControl
+        {
+            /// <summary>
+            /// Draws a Vector3 field with three text fields (for X, Y, and Z),
+            /// a slider to adjust the value of the currently selected text field,
+            /// and plus/minus buttons for fine-tuned control.
+            /// </summary>
+            /// <param name="label">A label describing the field group.</param>
+            /// <param name="value">The current Vector3 value.</param>
+            /// <param name="min">The minimum allowed value (slider lower bound).</param>
+            /// <param name="max">The maximum allowed value (slider upper bound).</param>
+            /// <param name="step">The increment/decrement step for the plus/minus buttons.</param>
+            /// <returns>The updated Vector3 value.</returns>
+            public static Vector3 DrawVector3Field(string label, Vector3 value, float min, float max, float step)
+            {
+                GUILayout.BeginVertical();
+                GUILayout.Label(label);
+
+                // Begin horizontal group for the three text fields.
+                GUILayout.BeginHorizontal();
+                // Assign unique control names so we can detect which one has focus.
+                GUI.SetNextControlName(label + "_X");
+                string xStr = GUILayout.TextField(value.x.ToString("F2"), GUILayout.Width(50));
+                GUI.SetNextControlName(label + "_Y");
+                string yStr = GUILayout.TextField(value.y.ToString("F2"), GUILayout.Width(50));
+                GUI.SetNextControlName(label + "_Z");
+                string zStr = GUILayout.TextField(value.z.ToString("F2"), GUILayout.Width(50));
+                GUILayout.EndHorizontal();
+
+                // Parse the text field values.
+                float x, y, z;
+                if (!float.TryParse(xStr, out x))
+                    x = value.x;
+                if (!float.TryParse(yStr, out y))
+                    y = value.y;
+                if (!float.TryParse(zStr, out z))
+                    z = value.z;
+
+                // Determine which component's text field is currently focused.
+                // Default is X (index 0); otherwise, index 1 for Y and 2 for Z.
+                string focusedControl = GUI.GetNameOfFocusedControl();
+                int selectedIndex = 0;
+                if (focusedControl == label + "_Y")
+                    selectedIndex = 1;
+                else if (focusedControl == label + "_Z")
+                    selectedIndex = 2;
+
+                // Get the currently selected component's value.
+                float selectedValue = (selectedIndex == 0) ? x : (selectedIndex == 1 ? y : z);
+
+                // Draw a slider for the selected component.
+                selectedValue = GUILayout.HorizontalSlider(selectedValue, min, max);
+                // Update the appropriate component with the slider value.
+                if (selectedIndex == 0)
+                    x = selectedValue;
+                else if (selectedIndex == 1)
+                    y = selectedValue;
+                else
+                    z = selectedValue;
+
+                // Draw plus and minus buttons for fine-tuning.
+                GUILayout.BeginHorizontal();
+                if (GUILayout.RepeatButton("-", GUILayout.Width(25)))
+                {
+                    if (selectedIndex == 0)
+                        x = Mathf.Max(min, x - step);
+                    else if (selectedIndex == 1)
+                        y = Mathf.Max(min, y - step);
+                    else
+                        z = Mathf.Max(min, z - step);
+                }
+                if (GUILayout.RepeatButton("+", GUILayout.Width(25)))
+                {
+                    if (selectedIndex == 0)
+                        x = Mathf.Min(max, x + step);
+                    else if (selectedIndex == 1)
+                        y = Mathf.Min(max, y + step);
+                    else
+                        z = Mathf.Min(max, z + step);
+                }
+                GUILayout.EndHorizontal();
+
+                GUILayout.EndVertical();
+                return new Vector3(x, y, z);
+            }
         }
     }
 }
