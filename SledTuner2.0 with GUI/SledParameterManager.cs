@@ -2,8 +2,8 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
-using MelonLoader;
 using UnityEngine;
+using MelonLoader;
 
 namespace SledTunerProject
 {
@@ -24,7 +24,8 @@ namespace SledTunerProject
         private Dictionary<string, Dictionary<string, object>> _currentValues;
 
         // Reflection cache
-        private readonly Dictionary<string, Dictionary<string, MemberWrapper>> _reflectionCache = new Dictionary<string, Dictionary<string, MemberWrapper>>();
+        private readonly Dictionary<string, Dictionary<string, MemberWrapper>> _reflectionCache
+            = new Dictionary<string, Dictionary<string, MemberWrapper>>();
 
         // Parameter metadata
         private Dictionary<string, Dictionary<string, ParameterMetadata>> _parameterMetadata;
@@ -43,11 +44,8 @@ namespace SledTunerProject
         // Constructor
         public SledParameterManager()
         {
-            // Define the components and field names to inspect:
-            //   - "horizontalWeightTransferMode" and driverMaxDistance* removed from SnowmobileControllerBase
-            //   - "hard"/"soft" removed from Shock, replaced with "compression","mass","maxCompression","velocity"
-            //   - "ragdollThreshold"/"ragdollThresholdDownFactor" in RagDollCollisionController
-            //   - RBC "constraints","interpolation","collisionDetectionMode" not in user's snippet
+            // Define the components and field names to inspect.
+            // Note: We have added "damping" to the Stabilizer fields along with "trackSpeedDamping".
             ComponentsToInspect = new Dictionary<string, string[]>
             {
                 ["SnowmobileController"] = new string[]
@@ -83,12 +81,11 @@ namespace SledTunerProject
                 },
                 ["Stabilizer"] = new string[]
                 {
-                    "trackSpeedGyroMultiplier", "idleGyro", "trackSpeedDamping"
+                    "trackSpeedGyroMultiplier", "idleGyro", "trackSpeedDamping", "damping"
                 },
                 ["RagDollCollisionController"] = new string[]
                 {
-                    "ragdollThreshold",
-                    "ragdollThresholdDownFactor"
+                    "ragdollThreshold", "ragdollThresholdDownFactor"
                 },
                 ["Rigidbody"] = new string[]
                 {
@@ -97,10 +94,7 @@ namespace SledTunerProject
                 ["Light"] = new string[] { "r", "g", "b", "a" },
                 ["Shock"] = new string[]
                 {
-                    "compression", // double typed in actual script
-                    "mass",
-                    "maxCompression",
-                    "velocity"
+                    "compression", "mass", "maxCompression", "velocity"
                 }
             };
 
@@ -119,17 +113,41 @@ namespace SledTunerProject
         private void InitializeParameterMetadata()
         {
             _parameterMetadata = new Dictionary<string, Dictionary<string, ParameterMetadata>>();
-            // For brevity, assume your existing parameter metadata blocks remain:
-            // e.g. SnowmobileController, SnowmobileControllerBase, MeshInterpretter, etc.
 
-            // Reaffirm ragdoll metadata:
+            // Example metadata for SnowmobileController
+            _parameterMetadata["SnowmobileController"] = new Dictionary<string, ParameterMetadata>
+            {
+                ["leanSteerFactorSoft"] = new ParameterMetadata("Lean Steer Factor (Soft)", "Soft steering factor", 0f, 10f),
+                ["leanSteerFactorTrail"] = new ParameterMetadata("Lean Steer Factor (Trail)", "Trail steering factor", 0f, 10f),
+                ["throttleExponent"] = new ParameterMetadata("Throttle Exponent", "Exponent for throttle input", 0f, 5f)
+                // ... add other fields as necessary
+            };
+
+            // Example metadata for MeshInterpretter
+            _parameterMetadata["MeshInterpretter"] = new Dictionary<string, ParameterMetadata>
+            {
+                ["power"] = new ParameterMetadata("Power", "Engine power", 0f, 200000f),
+                ["powerEfficiency"] = new ParameterMetadata("Power Efficiency", "Efficiency of power delivery", 0f, 1f)
+                // ... add other fields as necessary
+            };
+
+            // Metadata for Stabilizer – note the two Vector3 fields.
+            _parameterMetadata["Stabilizer"] = new Dictionary<string, ParameterMetadata>
+            {
+                ["trackSpeedGyroMultiplier"] = new ParameterMetadata("Track Speed Gyro Multiplier", "Gyro multiplier for track speed", 0f, 10f),
+                ["idleGyro"] = new ParameterMetadata("Idle Gyro", "Idle gyro value", 0f, 10f),
+                ["trackSpeedDamping"] = new ParameterMetadata("Track Speed Damping", "Damping factor for track speed", 0f, 10f),
+                ["damping"] = new ParameterMetadata("Damping", "Damping vector for stabilizer", 0f, 10f)
+            };
+
+            // Metadata for RagDollCollisionController
             _parameterMetadata["RagDollCollisionController"] = new Dictionary<string, ParameterMetadata>
             {
                 ["ragdollThreshold"] = new ParameterMetadata("Ragdoll Threshold", "Threshold for ragdoll activation", 0f, 1000f),
                 ["ragdollThresholdDownFactor"] = new ParameterMetadata("Ragdoll Threshold Down Factor", "Down factor for ragdoll threshold", 0f, 10f)
             };
 
-            // Add additional metadata for other components as needed.
+            // Add metadata for other components as needed...
         }
 
         public void InitializeComponents()
@@ -140,7 +158,7 @@ namespace SledTunerProject
             GameObject snowmobile = GameObject.Find("Snowmobile(Clone)");
             if (snowmobile == null)
             {
-                MelonLogger.Warning("[SledTuner] 'Snowmobile(Clone)' not found.");
+                MelonLogger.Warning("[SledTuner] 'Snowmobile(Clone)' not found. Waiting for sled spawn...");
                 return;
             }
             Transform bodyTransform = snowmobile.transform.Find("Body");
@@ -228,7 +246,10 @@ namespace SledTunerProject
                 return null;
             }
 
-            PropertyInfo prop = controller.GetType().GetProperty("GKMNAIKNNMJ", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            PropertyInfo prop = controller.GetType().GetProperty(
+                "GKMNAIKNNMJ",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+            );
             if (prop == null || !prop.CanRead)
             {
                 MelonLogger.Warning("[SledTuner] Property GKMNAIKNNMJ not found or unreadable.");
@@ -321,14 +342,15 @@ namespace SledTunerProject
                     {
                         MemberWrapper wrapper = new MemberWrapper();
 
-                        // Skip Light color channels (handled separately)
-                        if (compName == "Light" && (field == "r" || field == "g" || field == "b" || field == "a"))
+                        // Skip Light color channels – these are handled separately.
+                        if (compName == "Light" &&
+                            (field == "r" || field == "g" || field == "b" || field == "a"))
                         {
-                            // No reflection needed for these.
+                            // Do nothing here.
                         }
                         else
                         {
-                            // Attempt standard reflection first
+                            // Attempt standard reflection first.
                             FieldInfo fi = type.GetField(field, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                             if (fi != null)
                             {
@@ -341,13 +363,15 @@ namespace SledTunerProject
                                     wrapper.Property = pi;
                             }
 
-                            // If not found and we are dealing with RagDollCollisionController, check alternate spellings
+                            // If not found and dealing with RagDollCollisionController, check alternate spellings.
                             if (!wrapper.IsValid && compName == "RagDollCollisionController")
                             {
                                 if (field == "ragdollThreshold" || field == "ragdollThresholdDownFactor")
                                 {
                                     // Alternate spellings:
-                                    string altName = (field == "ragdollThreshold") ? "ragdollTreshold" : "ragdollTresholdDownFactor";
+                                    string altName = (field == "ragdollThreshold")
+                                        ? "ragdollTreshold"
+                                        : "ragdollTresholdDownFactor";
 
                                     FieldInfo altFi = type.GetField(altName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                                     if (altFi != null)
@@ -373,7 +397,7 @@ namespace SledTunerProject
                 }
                 else
                 {
-                    // If the component is not found, store empty wrappers for each field
+                    // If the component wasn't found, store empty wrappers.
                     foreach (string field in fields)
                     {
                         memberDict[field] = new MemberWrapper();
@@ -411,7 +435,7 @@ namespace SledTunerProject
                     continue;
                 }
 
-                // Read each field via TryReadMember
+                // Read each field via TryReadMember.
                 foreach (string field in fields)
                 {
                     compValues[field] = TryReadMember(comp, compName, field);
@@ -426,8 +450,9 @@ namespace SledTunerProject
 
         private object TryReadMember(Component comp, string compName, string fieldName)
         {
-            // Handle Light color channels separately
-            if (compName == "Light" && (fieldName == "r" || fieldName == "g" || fieldName == "b" || fieldName == "a"))
+            // Handle Light color channels specially.
+            if (compName == "Light" &&
+                (fieldName == "r" || fieldName == "g" || fieldName == "b" || fieldName == "a"))
             {
                 var lightComp = (Light)comp;
                 Color c = lightComp.color;
@@ -466,18 +491,25 @@ namespace SledTunerProject
             if (raw == null)
                 return null;
 
-            // Skip UnityEngine.Object types or complex types
+            // If the field is a Vector3, return it as-is.
+            if (fieldType == typeof(Vector3))
+                return (Vector3)raw;
+
             if (fieldType != null && typeof(UnityEngine.Object).IsAssignableFrom(fieldType))
                 return "(Skipped UnityEngine.Object)";
 
             if (fieldType != null && fieldType.IsEnum)
                 return raw;
 
-            if (fieldType != null && !fieldType.IsPrimitive && fieldType != typeof(string) && fieldType != typeof(decimal) && !fieldType.IsEnum)
+            if (fieldType != null && !fieldType.IsPrimitive
+                && fieldType != typeof(string)
+                && fieldType != typeof(decimal)
+                && !fieldType.IsEnum)
             {
                 return "(Skipped complex type)";
             }
 
+            // Otherwise numeric/bool/string => return raw.
             return raw;
         }
 
@@ -534,8 +566,9 @@ namespace SledTunerProject
             if (comp == null)
                 return;
 
-            // Special handling for Light color channels
-            if (compName == "Light" && (fieldName == "r" || fieldName == "g" || fieldName == "b" || fieldName == "a"))
+            // Special handling for Light color channels.
+            if (compName == "Light" &&
+                (fieldName == "r" || fieldName == "g" || fieldName == "b" || fieldName == "a"))
             {
                 var lightComp = (Light)comp;
                 Color c = lightComp.color;
@@ -573,9 +606,9 @@ namespace SledTunerProject
                 return;
             }
 
-            if (!_reflectionCache.TryGetValue(compName, out var memberDict) ||
-                !memberDict.TryGetValue(fieldName, out var wrapper) ||
-                !wrapper.IsValid)
+            if (!_reflectionCache.TryGetValue(compName, out var memberDict)
+                || !memberDict.TryGetValue(fieldName, out var wrapper)
+                || !wrapper.IsValid)
             {
                 return;
             }
@@ -600,35 +633,35 @@ namespace SledTunerProject
             }
         }
 
-        // Updated conversion method to handle numeric types properly (especially converting boxed doubles to float)
         private object ConvertValue(object raw, Type targetType)
         {
             if (raw == null || targetType == null)
                 return null;
 
+            // Handle Vector3 specially.
+            if (targetType == typeof(Vector3))
+            {
+                if (raw is Vector3)
+                    return raw;
+                // Additional handling could be implemented here if needed.
+                return raw;
+            }
+
             try
             {
-                if (targetType == typeof(float))
-                {
-                    return Convert.ToSingle(raw);
-                }
-                if (targetType == typeof(int))
-                {
-                    return Convert.ToInt32(raw);
-                }
-                if (targetType == typeof(bool))
-                {
-                    return Convert.ToBoolean(raw);
-                }
+                if (targetType == typeof(float) && raw is double dVal)
+                    return (float)dVal;
+                if (targetType == typeof(int) && raw is long lVal)
+                    return (int)lVal;
+                if (targetType == typeof(bool) && raw is bool bVal)
+                    return bVal;
                 if (targetType.IsInstanceOfType(raw))
-                {
                     return raw;
-                }
+
                 return Convert.ChangeType(raw, targetType);
             }
-            catch (Exception ex)
+            catch
             {
-                MelonLogger.Error($"[SledTuner] Error converting value {raw} to {targetType}: {ex.Message}");
                 return raw;
             }
         }
