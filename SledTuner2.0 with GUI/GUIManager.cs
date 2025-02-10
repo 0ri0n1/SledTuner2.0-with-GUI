@@ -84,9 +84,7 @@ namespace SledTunerProject
         private HashSet<string> _plusHeldNow = new HashSet<string>();
         private HashSet<string> _plusHeldPrev = new HashSet<string>();
 
-        // === DEBOUNCE / THROTTLE VARIABLES (if needed) ===
-        // (The debounce code remains here from the previous version, though your testing
-        // suggests that the layout update is the main issue. We keep it here in case further tuning is required.)
+        // === DEBOUNCE / THROTTLE VARIABLES ===
         private bool _pendingCommit = false;
         private float _lastCommitTime = 0f;
         private const float _commitDelay = 0.2f; // 200 milliseconds
@@ -173,7 +171,7 @@ namespace SledTunerProject
         }
 
         /// <summary>
-        /// Main IMGUI draw call. 
+        /// Main IMGUI draw call.
         /// We do not re-run reflection each time; we only manipulate local data.
         /// </summary>
         public void DrawMenu()
@@ -979,6 +977,7 @@ namespace SledTunerProject
             _colorPreviewTexture.SetPixels(pixels);
             _colorPreviewTexture.Apply();
         }
+
         public static class Vector3FieldControl
         {
             /// <summary>
@@ -1016,6 +1015,9 @@ namespace SledTunerProject
                     y = value.y;
                 if (!float.TryParse(zStr, out z))
                     z = value.z;
+
+                // Log the parsed values.
+                MelonLogger.Msg($"[Vector3FieldControl] {label} parsed values: X={x}, Y={y}, Z={z}");
 
                 // Determine which component's text field is currently focused.
                 // Default is X (index 0); otherwise, index 1 for Y and 2 for Z.
@@ -1062,7 +1064,9 @@ namespace SledTunerProject
                 GUILayout.EndHorizontal();
 
                 GUILayout.EndVertical();
-                return new Vector3(x, y, z);
+                Vector3 newValue = new Vector3(x, y, z);
+                MelonLogger.Msg($"[Vector3FieldControl] {label} updated Vector3: {newValue}");
+                return newValue;
             }
         }
     }

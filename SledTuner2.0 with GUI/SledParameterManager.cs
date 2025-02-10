@@ -23,14 +23,14 @@ namespace SledTunerProject
         private Dictionary<string, Dictionary<string, object>> _originalValues;
         private Dictionary<string, Dictionary<string, object>> _currentValues;
 
-        // Reflection cache
+        // Reflection cache: maps component names to field/property wrappers.
         private readonly Dictionary<string, Dictionary<string, MemberWrapper>> _reflectionCache
             = new Dictionary<string, Dictionary<string, MemberWrapper>>();
 
-        // Parameter metadata
+        // Parameter metadata (for slider ranges, display names, etc.)
         private Dictionary<string, Dictionary<string, ParameterMetadata>> _parameterMetadata;
 
-        // Helper structure for caching fields/properties
+        // Helper structure for caching fields/properties.
         private struct MemberWrapper
         {
             public FieldInfo Field;
@@ -41,7 +41,6 @@ namespace SledTunerProject
             public Type MemberType => Field != null ? Field.FieldType : Property?.PropertyType;
         }
 
-        // Constructor
         public SledParameterManager()
         {
             // Define the components and field names to inspect.
@@ -108,7 +107,7 @@ namespace SledTunerProject
             InitializeParameterMetadata();
         }
 
-        // Initialize metadata for each component's fields.
+        // Initializes metadata for each component's fields.
         private void InitializeParameterMetadata()
         {
             _parameterMetadata = new Dictionary<string, Dictionary<string, ParameterMetadata>>();
@@ -410,7 +409,7 @@ namespace SledTunerProject
             _currentValues[componentName][fieldName] = value;
         }
 
-        // === PRIVATE HELPER METHODS ===
+        // --- Private Helper Methods ---
 
         private void BuildReflectionCache()
         {
@@ -431,14 +430,12 @@ namespace SledTunerProject
                         MemberWrapper wrapper = new MemberWrapper();
 
                         // Skip Light color channels – these are handled separately.
-                        if (compName == "Light" &&
-                            (field == "r" || field == "g" || field == "b" || field == "a"))
+                        if (compName == "Light" && (field == "r" || field == "g" || field == "b" || field == "a"))
                         {
                             // Do nothing here.
                         }
                         else
                         {
-                            // Attempt standard reflection.
                             FieldInfo fi = type.GetField(field, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                             if (fi != null)
                             {
@@ -451,16 +448,14 @@ namespace SledTunerProject
                                     wrapper.Property = pi;
                             }
 
-                            // If not found and dealing with RagDollCollisionController, check alternate spellings.
+                            // For RagDollCollisionController, check for alternate spellings.
                             if (!wrapper.IsValid && compName == "RagDollCollisionController")
                             {
                                 if (field == "ragdollThreshold" || field == "ragdollThresholdDownFactor")
                                 {
-                                    // Alternate spellings:
                                     string altName = (field == "ragdollThreshold")
                                         ? "ragdollTreshold"
                                         : "ragdollTresholdDownFactor";
-
                                     FieldInfo altFi = type.GetField(altName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                                     if (altFi != null)
                                     {
@@ -485,7 +480,7 @@ namespace SledTunerProject
                 }
                 else
                 {
-                    // If the component wasn't found, store empty wrappers.
+                    // If the component isn't found, store empty wrappers.
                     foreach (string field in fields)
                     {
                         memberDict[field] = new MemberWrapper();
@@ -538,9 +533,8 @@ namespace SledTunerProject
 
         private object TryReadMember(Component comp, string compName, string fieldName)
         {
-            // Handle Light color channels specially.
-            if (compName == "Light" &&
-                (fieldName == "r" || fieldName == "g" || fieldName == "b" || fieldName == "a"))
+            // Special handling for Light color channels.
+            if (compName == "Light" && (fieldName == "r" || fieldName == "g" || fieldName == "b" || fieldName == "a"))
             {
                 var lightComp = (Light)comp;
                 Color c = lightComp.color;
@@ -579,7 +573,7 @@ namespace SledTunerProject
             if (raw == null)
                 return null;
 
-            // Handle Vector3 specially.
+            // Special handling for Vector3 types.
             if (fieldType == typeof(Vector3))
                 return (Vector3)raw;
 
@@ -589,10 +583,8 @@ namespace SledTunerProject
             if (fieldType != null && fieldType.IsEnum)
                 return raw;
 
-            if (fieldType != null && !fieldType.IsPrimitive
-                && fieldType != typeof(string)
-                && fieldType != typeof(decimal)
-                && !fieldType.IsEnum)
+            if (fieldType != null && !fieldType.IsPrimitive &&
+                fieldType != typeof(string) && fieldType != typeof(decimal) && !fieldType.IsEnum)
             {
                 return "(Skipped complex type)";
             }
@@ -654,12 +646,10 @@ namespace SledTunerProject
                 return;
 
             // Special handling for Light color channels.
-            if (compName == "Light" &&
-                (fieldName == "r" || fieldName == "g" || fieldName == "b" || fieldName == "a"))
+            if (compName == "Light" && (fieldName == "r" || fieldName == "g" || fieldName == "b" || fieldName == "a"))
             {
                 var lightComp = (Light)comp;
                 Color c = lightComp.color;
-
                 float floatVal = 0f;
                 if (value is double dVal)
                     floatVal = (float)dVal;
@@ -688,14 +678,13 @@ namespace SledTunerProject
                         c.a = Mathf.Clamp01(floatVal);
                         break;
                 }
-
                 lightComp.color = c;
                 return;
             }
 
-            if (!_reflectionCache.TryGetValue(compName, out var memberDict)
-                || !memberDict.TryGetValue(fieldName, out var wrapper)
-                || !wrapper.IsValid)
+            if (!_reflectionCache.TryGetValue(compName, out var memberDict) ||
+                !memberDict.TryGetValue(fieldName, out var wrapper) ||
+                !wrapper.IsValid)
             {
                 return;
             }
@@ -743,7 +732,6 @@ namespace SledTunerProject
                     return bVal;
                 if (targetType.IsInstanceOfType(raw))
                     return raw;
-
                 return Convert.ChangeType(raw, targetType);
             }
             catch
