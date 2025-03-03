@@ -35,6 +35,7 @@ namespace SledTunerProject
         private bool _menuOpen = false;
         private Rect _windowRect;
         private Vector2 _scrollPos = Vector2.zero;
+        private Vector2 _savedScrollPosition = Vector2.zero;
         private Vector2 _teleportScrollPos = Vector2.zero;
         private Vector2 _aboutScrollPosition = Vector2.zero;
         // Reflection-based parameters (string-based for display):
@@ -299,8 +300,16 @@ namespace SledTunerProject
 
             // Track if any button is being held
             bool wasButtonHeld = _isAnyButtonHeld;
+            
             // Count previous frame's held buttons instead of current ones
             _isAnyButtonHeld = _minusHeldPrev.Count > 0 || _plusHeldPrev.Count > 0;
+
+            // Save scroll position when a button is first pressed
+            // This prevents the scroll position from resetting during button holding
+            if (currentEvent.type == EventType.MouseDown && !wasButtonHeld && _isAnyButtonHeld)
+            {
+                _savedScrollPosition = _scrollPos;
+            }
 
             // Move 'now' sets to 'prev' sets, then clear 'now'
             _minusHeldPrev = new HashSet<string>(_minusHeldNow);
@@ -637,6 +646,7 @@ namespace SledTunerProject
 
         private void DrawAdvancedTunerMenu()
         {
+            // Draw the top buttons that should always be visible
             DrawConfigButtons();
             GUILayout.Space(5);
 
@@ -646,23 +656,20 @@ namespace SledTunerProject
             GUILayout.EndHorizontal();
             GUILayout.Space(5);
             
-            // When a button is being held, we need to keep the scroll position stable
-            // so parameters don't disappear during button press
-            if (_isAnyButtonHeld)
+            // Create a fixed height for parameters area to ensure consistent layout
+            GUILayout.BeginVertical(GUILayout.ExpandHeight(true), GUILayout.MinHeight(300));
+            
+            // Start the scroll view - Use saved position when buttons are held
+            Vector2 scrollPosToUse = _isAnyButtonHeld ? _savedScrollPosition : _scrollPos;
+            
+            // When buttons or sliders are interacted with, keep the scroll position fixed
+            if (Event.current.type == EventType.Used && (_minusHeldPrev.Count > 0 || _plusHeldPrev.Count > 0 || GUI.changed))
             {
-                // Use a fixed scroll position while buttons are held
-                GUILayout.BeginScrollView(_buttonPressScrollPos, GUILayout.ExpandHeight(true));
+                _scrollPos = GUILayout.BeginScrollView(_savedScrollPosition);
             }
             else
             {
-                // Normal scrolling behavior when no buttons are held
-                _scrollPos = GUILayout.BeginScrollView(_scrollPos, GUILayout.ExpandHeight(true));
-                
-                // If this is the first frame a button is pressed, save the current scroll position
-                if (_plusHeldNow.Count > 0 || _minusHeldNow.Count > 0)
-                {
-                    _buttonPressScrollPos = _scrollPos;
-                }
+                _scrollPos = GUILayout.BeginScrollView(scrollPosToUse);
             }
             
             // If we have search results, show them instead of the full parameter list
@@ -683,8 +690,12 @@ namespace SledTunerProject
             }
             
             GUILayout.EndScrollView();
+            GUILayout.EndVertical();
 
             GUILayout.Space(5);
+            
+            // Draw the footer buttons in a separate area outside the scroll view
+            // This ensures they are always visible
             DrawFooter();
         }
 
@@ -700,6 +711,22 @@ namespace SledTunerProject
                 ResetValues();
             GUILayout.EndHorizontal();
             GUILayout.Space(10);
+
+            // Create a fixed height for the parameters area
+            GUILayout.BeginVertical(GUILayout.Height(400));
+            
+            // Use the saved scroll position when a button is held
+            Vector2 scrollPosToUse = _isAnyButtonHeld ? _savedScrollPosition : _scrollPos;
+            
+            // When buttons or sliders are interacted with, keep the scroll position fixed
+            if (Event.current.type == EventType.Used && (_minusHeldPrev.Count > 0 || _plusHeldPrev.Count > 0 || GUI.changed))
+            {
+                _scrollPos = GUILayout.BeginScrollView(_savedScrollPosition);
+            }
+            else
+            {
+                _scrollPos = GUILayout.BeginScrollView(scrollPosToUse);
+            }
 
             // local fields only
             GUILayout.Label("FlySpeed");
@@ -754,6 +781,10 @@ namespace SledTunerProject
 
             GUILayout.Space(10);
             GUILayout.Label("Made by Samisalami", _labelStyle, GUILayout.Width(200));
+            
+            GUILayout.EndScrollView();
+            GUILayout.EndVertical();
+            
             GUILayout.EndVertical();
         }
 
@@ -764,37 +795,78 @@ namespace SledTunerProject
         /// </summary>
         private float DrawLocalFloatField(string uniqueKey, float currentVal, float min, float max)
         {
-            float newVal = GUILayout.HorizontalSlider(currentVal, min, max, GUILayout.Width(150));
+            // Check if the mouse is hovering over or interacting with controls in this row
+            Rect controlRect = GUILayoutUtility.GetLastRect();
+            bool isMouseOver = controlRect.Contains(Event.current.mousePosition);
+            
+            // Start with current value
+            float newVal = currentVal;
+            
+            // Handle slider separately to ensure it captures events properly
+            GUI.changed = false;
+            float sliderVal = GUILayout.HorizontalSlider(currentVal, min, max, GUILayout.Width(150));
+            
+            // If slider was moved, update the value and mark the UI as changed
+            if (GUI.changed)
+            {
+                newVal = sliderVal;
+                // When slider moves, consume the event to prevent scrolling
+                Event.current.Use();
+            }
+            
+            // Handle text field
             string textVal = GUILayout.TextField(newVal.ToString("F2"), GUILayout.Width(50));
             if (float.TryParse(textVal, out float parsed))
                 newVal = parsed;
 
+            // +/- buttons with improved event handling
             GUILayout.BeginHorizontal(GUILayout.Width(60));
-            // minus
+            
+            // Minus button
             string minusKey = uniqueKey + ".minus";
+            GUI.changed = false;
             bool minusHeld = GUILayout.RepeatButton("-", _buttonStyle, GUILayout.Width(25));
             if (minusHeld) 
             {
                 _minusHeldNow.Add(minusKey);
+                // Consume the event when button is clicked to prevent scrolling
+                if (Event.current.type == EventType.MouseDown || Event.current.type == EventType.MouseDrag)
+                {
+                    Event.current.Use();
+                }
             }
             
-            // plus
+            // Plus button
             string plusKey = uniqueKey + ".plus";
+            GUI.changed = false;
             bool plusHeld = GUILayout.RepeatButton("+", _buttonStyle, GUILayout.Width(25));
             if (plusHeld) 
             {
                 _plusHeldNow.Add(plusKey);
+                // Consume the event when button is clicked to prevent scrolling
+                if (Event.current.type == EventType.MouseDown || Event.current.type == EventType.MouseDrag)
+                {
+                    Event.current.Use();
+                }
             }
             GUILayout.EndHorizontal();
             
-            // On Repaint, do a single step if held
+            // On Repaint, apply the button increments if held
             if (Event.current.type == EventType.Repaint)
             {
+                // Use a larger step value for better visual feedback
+                float step = (max - min) / 100f;
+                step = Mathf.Max(0.01f, step);
+                
                 if (_minusHeldNow.Contains(minusKey))
-                    newVal = Mathf.Max(min, newVal - 0.01f);
+                    newVal = Mathf.Max(min, newVal - step);
                 if (_plusHeldNow.Contains(plusKey))
-                    newVal = Mathf.Min(max, newVal + 0.01f);
+                    newVal = Mathf.Min(max, newVal + step);
             }
+            
+            // Clamp the final value to the valid range
+            newVal = Mathf.Clamp(newVal, min, max);
+            
             return newVal;
         }
 
@@ -818,56 +890,86 @@ namespace SledTunerProject
                     curVal = 0f;
                 float newVal = curVal;
 
+                // Begin horizontal layout for the color channel
                 GUILayout.BeginHorizontal();
-                string label = (ch == "r") ? "Red" :
-                               (ch == "g") ? "Green" :
-                               (ch == "b") ? "Blue" :
-                               (ch == "a") ? "Alpha" : ch;
-
-                GUILayout.Label(label + ":", _labelStyle, GUILayout.Width(40));
+                string label = ch.ToUpper();
+                if (ch == "r") label = "Red";
+                if (ch == "g") label = "Green";
+                if (ch == "b") label = "Blue";
+                if (ch == "a") label = "Alpha";
+                GUILayout.Label(label, _labelStyle, GUILayout.Width(50));
+                
+                // Handle slider with improved event handling
+                GUI.changed = false;
                 newVal = GUILayout.HorizontalSlider(newVal, 0f, 1f, GUILayout.Width(150));
-                string textVal = GUILayout.TextField(newVal.ToString("F2"), _textFieldStyle, GUILayout.Width(40));
+                if (GUI.changed)
+                {
+                    // When slider moves, consume the event to prevent scrolling
+                    Event.current.Use();
+                }
+
+                // Handle text field
+                string textVal = GUILayout.TextField(newVal.ToString("F2"), _textFieldStyle, GUILayout.Width(45));
                 if (float.TryParse(textVal, out float parsedVal))
                     newVal = parsedVal;
 
-                // minus
+                // +/- buttons with improved event handling
+                GUILayout.BeginHorizontal(GUILayout.Width(60));
+                
+                // Minus button
                 string minusKey = compName + "." + ch + ".minus";
+                GUI.changed = false;
                 bool minusHeld = GUILayout.RepeatButton("-", _buttonStyle, GUILayout.Width(25));
                 if (minusHeld)
+                {
                     _minusHeldNow.Add(minusKey);
-
-                // plus
-                string plusKey = compName + "." + ch + ".plus";
-                bool plusHeld = GUILayout.RepeatButton("+", _buttonStyle, GUILayout.Width(25));
-                if (plusHeld)
-                    _plusHeldNow.Add(plusKey);
-
-                GUILayout.EndHorizontal();
-
-                if (Event.current.type == EventType.Repaint)
-                {
-                    if (_minusHeldNow.Contains(minusKey))
-                        newVal = Mathf.Max(0f, newVal - 0.01f);
-                    if (_plusHeldNow.Contains(plusKey))
-                        newVal = Mathf.Min(1f, newVal + 0.01f);
-                }
-
-                if (Mathf.Abs(newVal - curVal) > 0.0001f)
-                {
-                    // update the UI string
-                    _fieldInputs[compName][ch] = newVal.ToString("F2");
-
-                    if (isAdvanced)
+                    // Consume the event when button is clicked to prevent scrolling
+                    if (Event.current.type == EventType.MouseDown || Event.current.type == EventType.MouseDrag)
                     {
-                        // In advanced mode, we also store numeric in _fieldPreview
-                        // so that final commit can happen on release or 'Apply'
-                        if (_fieldPreview.ContainsKey(compName) &&
-                            _fieldPreview[compName].ContainsKey(ch))
-                        {
-                            _fieldPreview[compName][ch] = newVal;
-                        }
+                        Event.current.Use();
                     }
                 }
+                
+                // Plus button
+                string plusKey = compName + "." + ch + ".plus";
+                GUI.changed = false;
+                bool plusHeld = GUILayout.RepeatButton("+", _buttonStyle, GUILayout.Width(25));
+                if (plusHeld)
+                {
+                    _plusHeldNow.Add(plusKey);
+                    // Consume the event when button is clicked to prevent scrolling
+                    if (Event.current.type == EventType.MouseDown || Event.current.type == EventType.MouseDrag)
+                    {
+                        Event.current.Use();
+                    }
+                }
+                GUILayout.EndHorizontal();
+
+                // Apply +/- changes on Repaint
+                if (Event.current.type == EventType.Repaint)
+                {
+                    float step = 0.01f; // Color channels are 0-1, so use small steps
+                    
+                    if (_minusHeldNow.Contains(minusKey))
+                        newVal = Mathf.Max(0f, newVal - step);
+                    if (_plusHeldNow.Contains(plusKey))
+                        newVal = Mathf.Min(1f, newVal + step);
+                }
+
+                // Clamp and apply changes if value changed
+                newVal = Mathf.Clamp01(newVal);
+                if (Math.Abs(newVal - curVal) > 0.0001f)
+                {
+                    _fieldInputs[compName][ch] = newVal.ToString("F2");
+                    
+                    // Immediate update if not using manual apply
+                    if (!_manualApply)
+                    {
+                        CommitReflectionFieldIfNeeded(compName + "." + ch);
+                    }
+                }
+                
+                GUILayout.EndHorizontal();
             }
         }
 
@@ -1594,8 +1696,14 @@ namespace SledTunerProject
                 // Compact layout for search results
                 GUILayout.BeginHorizontal(GUILayout.ExpandWidth(true));
                 
-                // Slider
+                // Slider with improved event handling
+                GUI.changed = false;
                 float sliderVal = GUILayout.HorizontalSlider((float)currentVal, sliderMin, sliderMax, GUILayout.Width(120));
+                if (GUI.changed)
+                {
+                    // When slider moves, consume the event to prevent scrolling
+                    Event.current.Use();
+                }
                 
                 // Text field
                 string newText = GUILayout.TextField(((float)currentVal).ToString("F2"), _textFieldStyle, GUILayout.Width(60));
@@ -1604,15 +1712,33 @@ namespace SledTunerProject
                     sliderVal = parsedVal;
                 }
                 
-                // +/- buttons
+                // +/- buttons with improved event handling
                 GUILayout.BeginHorizontal(GUILayout.Width(60));
                 string minusKey = compName + "." + fieldName + ".minus";
+                GUI.changed = false;
                 bool minusHeld = GUILayout.RepeatButton("-", _buttonStyle, GUILayout.Width(25));
-                if (minusHeld) _minusHeldNow.Add(minusKey);
+                if (minusHeld)
+                {
+                    _minusHeldNow.Add(minusKey);
+                    // Consume the event when button is clicked to prevent scrolling
+                    if (Event.current.type == EventType.MouseDown || Event.current.type == EventType.MouseDrag)
+                    {
+                        Event.current.Use();
+                    }
+                }
                 
                 string plusKey = compName + "." + fieldName + ".plus";
+                GUI.changed = false;
                 bool plusHeld = GUILayout.RepeatButton("+", _buttonStyle, GUILayout.Width(25));
-                if (plusHeld) _plusHeldNow.Add(plusKey);
+                if (plusHeld)
+                {
+                    _plusHeldNow.Add(plusKey);
+                    // Consume the event when button is clicked to prevent scrolling
+                    if (Event.current.type == EventType.MouseDown || Event.current.type == EventType.MouseDrag)
+                    {
+                        Event.current.Use();
+                    }
+                }
                 GUILayout.EndHorizontal();
                 
                 double finalVal = (double)sliderVal;
@@ -1624,6 +1750,9 @@ namespace SledTunerProject
                     if (_plusHeldNow.Contains(plusKey))
                         finalVal = Math.Min(sliderMax, finalVal + step);
                 }
+                
+                // Clamp and apply changes if value changed
+                finalVal = Math.Max(sliderMin, Math.Min(sliderMax, finalVal));
                 
                 if (Math.Abs(finalVal - currentVal) > 0.0001)
                 {
@@ -1650,8 +1779,14 @@ namespace SledTunerProject
                 // Label
                 GUILayout.Label(fieldName + ":", _labelStyle, GUILayout.Width(120));
                 
-                // Slider
+                // Slider with improved event handling
+                GUI.changed = false;
                 float sliderVal = GUILayout.HorizontalSlider((float)currentVal, sliderMin, sliderMax, GUILayout.Width(150));
+                if (GUI.changed)
+                {
+                    // When slider moves, consume the event to prevent scrolling
+                    Event.current.Use();
+                }
                 
                 // Text field
                 string newText = GUILayout.TextField(((float)currentVal).ToString("F2"), _textFieldStyle, GUILayout.Width(60));
@@ -1660,15 +1795,33 @@ namespace SledTunerProject
                     sliderVal = parsedVal;
                 }
                 
-                // +/- buttons
+                // +/- buttons with improved event handling
                 GUILayout.BeginHorizontal(GUILayout.Width(60));
                 string minusKey = compName + "." + fieldName + ".minus";
+                GUI.changed = false;
                 bool minusHeld = GUILayout.RepeatButton("-", _buttonStyle, GUILayout.Width(25));
-                if (minusHeld) _minusHeldNow.Add(minusKey);
+                if (minusHeld)
+                {
+                    _minusHeldNow.Add(minusKey);
+                    // Consume the event when button is clicked to prevent scrolling
+                    if (Event.current.type == EventType.MouseDown || Event.current.type == EventType.MouseDrag)
+                    {
+                        Event.current.Use();
+                    }
+                }
                 
                 string plusKey = compName + "." + fieldName + ".plus";
+                GUI.changed = false;
                 bool plusHeld = GUILayout.RepeatButton("+", _buttonStyle, GUILayout.Width(25));
-                if (plusHeld) _plusHeldNow.Add(plusKey);
+                if (plusHeld)
+                {
+                    _plusHeldNow.Add(plusKey);
+                    // Consume the event when button is clicked to prevent scrolling
+                    if (Event.current.type == EventType.MouseDown || Event.current.type == EventType.MouseDrag)
+                    {
+                        Event.current.Use();
+                    }
+                }
                 GUILayout.EndHorizontal();
                 
                 double finalVal = (double)sliderVal;
@@ -1681,6 +1834,9 @@ namespace SledTunerProject
                         finalVal = Math.Min(sliderMax, finalVal + step);
                 }
                 
+                // Clamp and apply changes if value changed
+                finalVal = Math.Max(sliderMin, Math.Min(sliderMax, finalVal));
+                
                 if (Math.Abs(finalVal - currentVal) > 0.0001)
                 {
                     _fieldPreview[compName][fieldName] = finalVal;
@@ -1691,9 +1847,6 @@ namespace SledTunerProject
                     {
                         CommitReflectionFieldIfNeeded(compName + "." + fieldName);
                     }
-                    
-                    // Force repaint to update slider position
-                    GUI.changed = true;
                 }
                 
                 GUILayout.EndHorizontal();

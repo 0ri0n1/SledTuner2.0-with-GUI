@@ -1,0 +1,8 @@
+{
+    "dotnet.preferCSharpExtension": true,
+    "omnisharp.useModernNet": false,
+    "omnisharp.enableRoslynAnalyzers": true,
+    "omnisharp.enableEditorConfigSupport": true,
+    "omnisharp.useGlobalMono": "never",
+    "dotnet.defaultSolution": "SledTuner2.0 with GUI.sln"
+}

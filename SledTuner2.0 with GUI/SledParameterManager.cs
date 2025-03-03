@@ -1,7 +1,10 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Linq;
+using System.Threading.Tasks;
 using MelonLoader;
 using UnityEngine;
 
@@ -13,11 +16,19 @@ namespace SledTunerProject
         public readonly Dictionary<string, string[]> ComponentsToInspect;
         public string JsonFolderPath { get; }
         public bool IsInitialized { get; private set; } = false;
+        
+        // Track initialization attempts for diagnostics
+        public int InitializationAttempts { get; private set; } = 0;
+        public Dictionary<string, string> LastInitializationErrors { get; private set; } = new Dictionary<string, string>();
+
+        // Event that fires when initialization is complete
+        public event EventHandler InitializationComplete;
 
         // References to game objects and components
         private GameObject _snowmobileBody;
         private Rigidbody _rigidbody;
         private Light _light;
+        private GameObject _snowmobile;
 
         // Dictionaries to hold parameter values
         private Dictionary<string, Dictionary<string, object>> _originalValues;
@@ -26,6 +37,10 @@ namespace SledTunerProject
         // Reflection cache
         private readonly Dictionary<string, Dictionary<string, MemberWrapper>> _reflectionCache
             = new Dictionary<string, Dictionary<string, MemberWrapper>>();
+            
+        // Cache delegates for frequently accessed components to avoid reflection overhead
+        private Dictionary<string, Func<object>> _getterCache = new Dictionary<string, Func<object>>();
+        private Dictionary<string, Action<object>> _setterCache = new Dictionary<string, Action<object>>();
 
         // Parameter metadata
         private Dictionary<string, Dictionary<string, ParameterMetadata>> _parameterMetadata;
@@ -120,7 +135,7 @@ namespace SledTunerProject
         private void InitializeParameterMetadata()
         {
             _parameterMetadata = new Dictionary<string, Dictionary<string, ParameterMetadata>>();
-            // For brevity, assume user’s existing parameter metadata blocks remain:
+            // For brevity, assume user's existing parameter metadata blocks remain:
             // e.g. SnowmobileController, SnowmobileControllerBase, MeshInterpretter, etc.
 
             // Just reaffirm ragdoll metadata:
@@ -133,43 +148,210 @@ namespace SledTunerProject
             // And so on for the rest (not omitted from user snippet).
         }
 
+        /// <summary>
+        /// Initialize components with improved error handling and retry logic
+        /// </summary>
         public void InitializeComponents()
         {
             IsInitialized = false;
-            MelonLogger.Msg("[SledTuner] Initializing sled components...");
+            LastInitializationErrors.Clear();
+            InitializationAttempts++;
+            
+            MelonLogger.Msg($"[SledTuner] Initializing sled components... (Attempt #{InitializationAttempts})");
 
-            GameObject snowmobile = GameObject.Find("Snowmobile(Clone)");
-            if (snowmobile == null)
+            try
             {
-                MelonLogger.Warning("[SledTuner] 'Snowmobile(Clone)' not found.");
-                return;
+                // First find the snowmobile with multiple methods
+                _snowmobile = FindSnowmobile();
+                if (_snowmobile == null)
+                {
+                    LogInitError("Snowmobile", "Could not find snowmobile through any method");
+                    return;
+                }
+
+                // Find the body with fallback search patterns
+                _snowmobileBody = FindBodyComponent(_snowmobile);
+                if (_snowmobileBody == null)
+                {
+                    LogInitError("Body", "Could not find body component under snowmobile");
+                    return;
+                }
+
+                // Get the rigidbody with explicit null check
+                _rigidbody = _snowmobileBody.GetComponent<Rigidbody>();
+                if (_rigidbody == null)
+                {
+                    LogInitError("Rigidbody", "No Rigidbody component found on Body");
+                }
+
+                // Find spot light with multiple search patterns
+                _light = FindSpotLight();
+                if (_light == null)
+                {
+                    MelonLogger.Warning("[SledTuner] Spot Light not found. Headlight customization will be unavailable.");
+                }
+
+                // Build the reflection cache
+                BuildReflectionCache();
+                
+                // Get initial values
+                _originalValues = InspectSledComponents();
+                _currentValues = InspectSledComponents();
+
+                if (_originalValues.Count > 0)
+                {
+                    IsInitialized = true;
+                    MelonLogger.Msg("[SledTuner] Sled components initialized successfully.");
+                }
+                else
+                {
+                    LogInitError("Inspection", "Sled component inspection failed to find any values");
+                }
             }
+            catch (Exception ex)
+            {
+                LogInitError("Exception", $"Initialization failed with exception: {ex.Message}");
+                MelonLogger.Error($"[SledTuner] Exception during initialization: {ex}");
+            }
+
+            // At the end of the method, after all initialization is complete:
+            if (IsInitialized)
+            {
+                // Trigger the initialization complete event
+                InitializationComplete?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        /// <summary>
+        /// Finds the snowmobile using multiple search patterns
+        /// </summary>
+        private GameObject FindSnowmobile()
+        {
+            // Common names for the snowmobile object
+            string[] searchPatterns = new string[] {
+                "Snowmobile(Clone)",
+                "Snowmobile",
+                "Vehicle",
+                "PlayerVehicle"
+            };
+
+            // Try each pattern
+            foreach (string pattern in searchPatterns)
+            {
+                GameObject found = GameObject.Find(pattern);
+                if (found != null)
+                {
+                    MelonLogger.Msg($"[SledTuner] Found snowmobile using pattern: {pattern}");
+                    return found;
+                }
+            }
+
+            // Try finding by tag if patterns failed
+            GameObject[] vehicles = GameObject.FindGameObjectsWithTag("Vehicle");
+            if (vehicles.Length > 0)
+            {
+                MelonLogger.Msg("[SledTuner] Found snowmobile using Vehicle tag");
+                return vehicles[0];
+            }
+
+            // Last resort: search for anything with "snowmobile" in the name
+            GameObject[] allObjects = GameObject.FindObjectsOfType<GameObject>();
+            foreach (GameObject obj in allObjects)
+            {
+                if (obj.name.ToLower().Contains("snowmobile") || obj.name.ToLower().Contains("sled"))
+                {
+                    MelonLogger.Msg($"[SledTuner] Found snowmobile by name search: {obj.name}");
+                    return obj;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Finds the body component under the snowmobile with fallbacks
+        /// </summary>
+        private GameObject FindBodyComponent(GameObject snowmobile)
+        {
+            // Try direct child named "Body"
             Transform bodyTransform = snowmobile.transform.Find("Body");
-            if (bodyTransform == null)
+            if (bodyTransform != null)
             {
-                MelonLogger.Warning("[SledTuner] 'Body' not found under 'Snowmobile(Clone)'.");
-                return;
+                return bodyTransform.gameObject;
             }
-            _snowmobileBody = bodyTransform.gameObject;
-            _rigidbody = _snowmobileBody.GetComponent<Rigidbody>();
 
-            Transform spotLightTransform = _snowmobileBody.transform.Find("Spot Light");
-            if (spotLightTransform != null)
-                _light = spotLightTransform.GetComponent<Light>();
-
-            BuildReflectionCache();
-            _originalValues = InspectSledComponents();
-            _currentValues = InspectSledComponents();
-
-            if (_originalValues != null)
+            // Try searching for any child with "Body" in the name
+            foreach (Transform child in snowmobile.transform)
             {
-                IsInitialized = true;
-                MelonLogger.Msg("[SledTuner] Sled components initialized successfully.");
+                if (child.name.Contains("Body"))
+                {
+                    return child.gameObject;
+                }
             }
-            else
+
+            // If no body found, try the snowmobile itself as a fallback
+            MelonLogger.Warning("[SledTuner] No 'Body' child found. Using snowmobile itself as body.");
+            return snowmobile;
+        }
+
+        /// <summary>
+        /// Finds the spot light with multiple search patterns
+        /// </summary>
+        private Light FindSpotLight()
+        {
+            if (_snowmobileBody == null) return null;
+
+            // Try common paths
+            string[] lightPaths = new string[] {
+                "Spot Light",
+                "SpotLight",
+                "Headlight",
+                "Light",
+                "Lamp"
+            };
+
+            foreach (string path in lightPaths)
             {
-                MelonLogger.Warning("[SledTuner] Sled component inspection failed.");
+                Transform lightTransform = _snowmobileBody.transform.Find(path);
+                if (lightTransform != null)
+                {
+                    Light light = lightTransform.GetComponent<Light>();
+                    if (light != null)
+                    {
+                        MelonLogger.Msg($"[SledTuner] Found spot light at path: {path}");
+                        return light;
+                    }
+                }
             }
+
+            // If no direct child found, try searching recursively
+            Light[] allLights = _snowmobileBody.GetComponentsInChildren<Light>(true);
+            if (allLights.Length > 0)
+            {
+                // Prioritize spot lights
+                Light spotLight = allLights.FirstOrDefault(l => l.type == LightType.Spot);
+                if (spotLight != null)
+                {
+                    MelonLogger.Msg("[SledTuner] Found spot light by recursive search");
+                    return spotLight;
+                }
+                
+                // If no spot light, just use the first light
+                MelonLogger.Msg("[SledTuner] No spot light found, using first available light");
+                return allLights[0];
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Logs an initialization error and adds it to the errors dictionary
+        /// </summary>
+        private void LogInitError(string component, string message)
+        {
+            string errorMsg = $"[SledTuner] {message}";
+            MelonLogger.Warning(errorMsg);
+            LastInitializationErrors[component] = message;
         }
 
         public void ApplyParameters()
@@ -628,13 +810,99 @@ namespace SledTunerProject
                     return bVal;
                 if (targetType.IsInstanceOfType(raw))
                     return raw;
+                    
+                // Handle Vector3 conversion
+                if (targetType == typeof(Vector3))
+                {
+                    // If it's already a Vector3, return it
+                    if (raw is Vector3 v3)
+                        return v3;
+                        
+                    // If it's a string, try to parse it
+                    if (raw is string strVal)
+                    {
+                        try
+                        {
+                            // Remove parentheses if present
+                            strVal = strVal.Trim('(', ')', ' ');
+                            
+                            // Split into components using both comma and space as possible separators
+                            string[] components = strVal.Split(new char[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                            if (components.Length >= 3)
+                            {
+                                // Use invariant culture to avoid regional decimal separator issues
+                                float x = float.Parse(components[0].Trim(), System.Globalization.CultureInfo.InvariantCulture);
+                                float y = float.Parse(components[1].Trim(), System.Globalization.CultureInfo.InvariantCulture);
+                                float z = float.Parse(components[2].Trim(), System.Globalization.CultureInfo.InvariantCulture);
+                                return new Vector3(x, y, z);
+                            }
+                            
+                            // Fallback: return zero vector if parsing fails
+                            MelonLogger.Warning($"[SledTuner] Couldn't parse Vector3 from '{strVal}', using Vector3.zero");
+                            return Vector3.zero;
+                        }
+                        catch (Exception ex)
+                        {
+                            MelonLogger.Warning($"[SledTuner] Error parsing Vector3: {ex.Message}");
+                            return Vector3.zero;
+                        }
+                    }
+                    
+                    // Handle other cases like arrays or lists of numbers
+                    if (raw is IList list && list.Count >= 3)
+                    {
+                        try
+                        {
+                            float x = Convert.ToSingle(list[0]);
+                            float y = Convert.ToSingle(list[1]);
+                            float z = Convert.ToSingle(list[2]);
+                            return new Vector3(x, y, z);
+                        }
+                        catch (Exception ex)
+                        {
+                            MelonLogger.Warning($"[SledTuner] Error converting list to Vector3: {ex.Message}");
+                            return Vector3.zero;
+                        }
+                    }
+                    
+                    // Last resort - try to convert to string and then parse
+                    try
+                    {
+                        return ConvertValue(raw.ToString(), targetType);
+                    }
+                    catch
+                    {
+                        MelonLogger.Warning($"[SledTuner] Failed all attempts to convert {raw} to Vector3");
+                        return Vector3.zero;
+                    }
+                }
 
                 return Convert.ChangeType(raw, targetType);
             }
-            catch
+            catch (Exception ex)
             {
+                MelonLogger.Warning($"[SledTuner] Type conversion error: {ex.Message}");
                 return raw;
             }
+        }
+
+        /// <summary>
+        /// Resets the manager state
+        /// </summary>
+        public void Reset()
+        {
+            IsInitialized = false;
+            _snowmobileBody = null;
+            _rigidbody = null;
+            _light = null;
+            _snowmobile = null;
+            
+            // Clear caches
+            _reflectionCache.Clear();
+            _getterCache.Clear();
+            _setterCache.Clear();
+            
+            MelonLogger.Msg("[SledParameterManager] Reset complete");
         }
     }
 }

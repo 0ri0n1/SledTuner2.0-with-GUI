@@ -1,0 +1,16 @@
+{
+  "dotnet": {
+    "references": {
+      "paths": [
+        "D:\\SteamLibrary\\steamapps\\common\\Sledders\\MelonLoader\\net35",
+        "D:\\SteamLibrary\\steamapps\\common\\Sledders\\Sledders_Data\\Managed"
+      ]
+    }
+  },
+  "language_server": {
+    "csharp": {
+      "enabled": true,
+      "mode": "auto"
+    }
+  }
+} 
